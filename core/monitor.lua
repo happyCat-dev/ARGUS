@@ -84,18 +84,52 @@ function monitor:buildView(id, base, now)
     view.stored = view.stored or 0
     view.percent = (view.capacity > 0) and math.min(view.stored / view.capacity, 1.0) or nil
 
-    -- Measured rate is authoritative: it already includes passive loss and works
-    -- for sources that report no throughput at all. EU IN/OUT is the fallback
-    -- until enough samples exist.
+    -- Prefer the source's own throughput; fall back to differencing `stored`.
+    --
+    -- This order used to be reversed, and it was wrong twice over. GregTech
+    -- averages EU IN/OUT over 20 ticks, so it reacts in a second; differencing
+    -- `stored` needs a multi-second window and visibly lagged behind the graph.
+    -- It is also less precise where it matters most: past 2^53 a double's ULP is
+    -- around a thousand EU, so a modest current through a nearly-full LSC drowns
+    -- in rounding noise.
+    --
+    -- Differencing still wins for sources that report no throughput (IC2
+    -- storage), which is what ratesUnavailable marks.
     local measured = metrics.rate(tracker, now, 5)
-    if measured then
-        view.net = measured
+    if view.ratesUnavailable or not (view.euIn or view.euOut) then
+        view.net = measured or 0
     else
         view.net = (view.euIn or 0) - (view.euOut or 0) - (view.passiveLoss or 0)
     end
 
-    view.avg5m = view.avg5m or metrics.average(tracker, now, 300)
-    view.avg1h = view.avg1h or metrics.average(tracker, now, 3600)
+    -- Derive the net from in/out whenever both are known, rather than taking a
+    -- separately measured figure. The three columns are read side by side, and
+    -- a net that does not equal received minus sent makes the whole panel look
+    -- broken — even when each number is defensible on its own.
+    if view.avg5mIn and view.avg5mOut then
+        view.avg5m = view.avg5mIn - view.avg5mOut
+    else
+        view.avg5m = view.avg5m or metrics.average(tracker, now, 300)
+    end
+    if view.avg1hIn and view.avg1hOut then
+        view.avg1h = view.avg1hIn - view.avg1hOut
+    else
+        view.avg1h = view.avg1h or metrics.average(tracker, now, 3600)
+    end
+
+    -- How much energy actually moved over each window. In and out separately
+    -- when the source tracks them, because a net figure alone cannot tell a busy
+    -- hour that balanced out from an idle one.
+    view.total5m = {
+        received = metrics.energyOver(view.avg5mIn, 300),
+        sent = metrics.energyOver(view.avg5mOut, 300),
+        net = metrics.energyOver(view.avg5m, 300),
+    }
+    view.total1h = {
+        received = metrics.energyOver(view.avg1hIn, 3600),
+        sent = metrics.energyOver(view.avg1hOut, 3600),
+        net = metrics.energyOver(view.avg1h, 3600),
+    }
     view.fillSeconds, view.fillDirection = metrics.projection(view.stored, view.capacity, view.net)
 
     return view
@@ -105,6 +139,35 @@ local function worstState(a, b)
     if not a then return b end
     if not b then return a end
     return (STATE_SEVERITY[b] or 0) > (STATE_SEVERITY[a] or 0) and b or a
+end
+
+-- Fold one buffer into the aggregate.
+--
+-- Windowed averages are summed only while EVERY contributing buffer reports
+-- them: a partial sum would silently understate "received in the last hour",
+-- which is worse than admitting the figure is unavailable.
+local function foldIntoTotal(total, view)
+    if view.state ~= states.MISSING then
+        total.stored = total.stored + (view.stored or 0)
+        total.capacity = total.capacity + (view.capacity or 0)
+        total.euIn = total.euIn + (view.euIn or 0)
+        total.euOut = total.euOut + (view.euOut or 0)
+        total.passiveLoss = total.passiveLoss + (view.passiveLoss or 0)
+        total.members = total.members + 1
+
+        if view.ratesUnavailable then total.ratesUnavailable = true end
+
+        if view.avg5mIn and view.avg1hIn then
+            total.avg5mIn = (total.avg5mIn or 0) + view.avg5mIn
+            total.avg5mOut = (total.avg5mOut or 0) + (view.avg5mOut or 0)
+            total.avg1hIn = (total.avg1hIn or 0) + view.avg1hIn
+            total.avg1hOut = (total.avg1hOut or 0) + (view.avg1hOut or 0)
+        else
+            total.windowsIncomplete = true
+        end
+    end
+    total.problems = total.problems + (view.problems or 0)
+    total.state = worstState(total.state, view.state)
 end
 
 function monitor:update()
@@ -127,17 +190,7 @@ function monitor:update()
             local reading = sources.read(entry)
             local view = self:buildView(entry.address, reading, now)
             add(view)
-
-            if view.state ~= states.MISSING then
-                total.stored = total.stored + view.stored
-                total.capacity = total.capacity + view.capacity
-                total.euIn = total.euIn + (view.euIn or 0)
-                total.euOut = total.euOut + (view.euOut or 0)
-                total.passiveLoss = total.passiveLoss + (view.passiveLoss or 0)
-                total.members = total.members + 1
-            end
-            total.problems = total.problems + (view.problems or 0)
-            total.state = worstState(total.state, view.state)
+            foldIntoTotal(total, view)
 
             -- The wireless network has no component of its own; surface it as a
             -- separate selectable view hanging off the LSC that reports it.
@@ -154,6 +207,10 @@ function monitor:update()
                     -- renderers must fall back to a rate-only layout.
                     capacity = 0,
                     euIn = 0, euOut = 0, passiveLoss = 0, problems = 0,
+                    -- Nothing reports throughput for the wireless network, so its
+                    -- rate can only be measured from how the balance moves.
+                    -- Without this the zeroes above would read as a flat zero.
+                    ratesUnavailable = true,
                 }, now)
                 add(wirelessView)
             end
@@ -172,17 +229,14 @@ function monitor:update()
         local view = self:buildView(base.id, base, now)
         view.remote = true
         add(view)
+        foldIntoTotal(total, view)
+    end
 
-        if view.state ~= states.MISSING then
-            total.stored = total.stored + (view.stored or 0)
-            total.capacity = total.capacity + (view.capacity or 0)
-            total.euIn = total.euIn + (view.euIn or 0)
-            total.euOut = total.euOut + (view.euOut or 0)
-            total.passiveLoss = total.passiveLoss + (view.passiveLoss or 0)
-            total.members = total.members + 1
-        end
-        total.problems = total.problems + (view.problems or 0)
-        total.state = worstState(total.state, view.state)
+    -- Any buffer that could not report a windowed average makes the aggregate's
+    -- in/out totals an undercount, so drop them rather than mislead.
+    if total.windowsIncomplete then
+        total.avg5mIn, total.avg5mOut = nil, nil
+        total.avg1hIn, total.avg1hOut = nil, nil
     end
 
     total.state = total.state or states.MISSING

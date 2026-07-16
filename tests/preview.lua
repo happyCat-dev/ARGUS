@@ -137,23 +137,29 @@ config.buffers = {}
 local monitor = monitorLib.new(config)
 
 local function stage(id, name, stored, storedText, capacity, euIn, euOut, loss, state)
+    -- buildView decorates the table it is given, so hand it a fresh one each
+    -- time. This used to be two copies of the same literal, and they drifted:
+    -- the second lacked the windowed averages, so the totals showed only dashes.
+    local function reading()
+        return {
+            name = name, kind = "lsc", state = state or states.ONLINE,
+            stored = stored, storedText = storedText, capacity = capacity,
+            euIn = euIn, euOut = euOut, passiveLoss = loss, problems = 0,
+            -- Windowed averages, as an LSC reports them; the totals derive from these.
+            avg5mIn = euIn * 0.9, avg5mOut = euOut * 0.8,
+            avg1hIn = euIn * 1.1, avg1hOut = euOut * 1.2,
+        }
+    end
+
     clock = 0
-    local view = monitor:buildView(id, {
-        name = name, kind = "lsc", state = state or states.ONLINE,
-        stored = stored, storedText = storedText, capacity = capacity,
-        euIn = euIn, euOut = euOut, passiveLoss = loss, problems = 0,
-    }, clock)
+    local view = monitor:buildView(id, reading(), clock)
     -- Feed a rising charge history so the graph has something to draw.
     for i = 1, 120 do
         clock = i * 5
         local wave = stored * (0.86 + 0.14 * math.sin(i / 9))
         require("core.metrics").update(view.tracker, wave, clock)
     end
-    view = monitor:buildView(id, {
-        name = name, kind = "lsc", state = state or states.ONLINE,
-        stored = stored, storedText = storedText, capacity = capacity,
-        euIn = euIn, euOut = euOut, passiveLoss = loss, problems = 0,
-    }, clock + 1)
+    view = monitor:buildView(id, reading(), clock + 1)
     monitor.views[id] = view
     table.insert(monitor.order, id)
     return view

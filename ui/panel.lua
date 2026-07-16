@@ -106,28 +106,49 @@ function panel.draw(x, row, width, rows, view, theme, palette, graphWindow)
             " / " .. format.compact(view.capacity), theme.muted, true)
     end
 
-    -- Metrics grid ----------------------------------------------------------
+    -- Rates now ---------------------------------------------------------------
     local gridRow = storedRow + 2
-    local column = math.floor(width / 2)
     local netColor = (view.net or 0) >= 0 and palette.green or palette.red
 
     stat(x, gridRow, "NET", format.rate(view.net), theme, netColor)
-    stat(x, gridRow + 1, "5 min", format.rate(view.avg5m), theme)
-    stat(x, gridRow + 2, "1 h", format.rate(view.avg1h), theme)
-
     if view.kind ~= "wireless" then
-        stat(x + column, gridRow, "IN", format.magnitude(view.euIn), theme, palette.green)
-        stat(x + column, gridRow + 1, "OUT", format.magnitude(view.euOut), theme, palette.orange)
-        stat(x + column, gridRow + 2, "LOSS", format.magnitude(view.passiveLoss), theme, palette.slate)
+        stat(x + 26, gridRow, "IN", format.magnitude(view.euIn), theme, palette.green)
+        stat(x + 52, gridRow, "OUT", format.magnitude(view.euOut), theme, palette.orange)
+        stat(x + 78, gridRow, "LOSS", format.magnitude(view.passiveLoss), theme, palette.slate)
     end
 
+    -- Energy moved -------------------------------------------------------------
+    -- Totals, not average rates. "Averaging 32.8k EU/t over the last hour" is
+    -- the same fact as "received 2.36G EU in the last hour", but only the second
+    -- answers what people ask. A net figure alone cannot: a busy hour that
+    -- balanced out and an idle one look identical.
+    local totalsRow = gridRow + 2
+    graphics.text(x, totalsRow, "Energy moved", theme.muted, true)
+    graphics.text(x + 16, totalsRow, "received", theme.muted, true)
+    graphics.text(x + 32, totalsRow, "sent", theme.muted, true)
+    graphics.text(x + 48, totalsRow, "net", theme.muted, true)
+
+    local function totalsLine(row, label, totals)
+        graphics.text(x + 1, row, label, theme.text, true)
+        totals = totals or {}
+        graphics.text(x + 16, row, totals.received and format.compact(totals.received) or "--",
+            totals.received and palette.green or theme.muted, true)
+        graphics.text(x + 32, row, totals.sent and format.compact(totals.sent) or "--",
+            totals.sent and palette.orange or theme.muted, true)
+        graphics.text(x + 48, row, format.delta(totals.net),
+            (totals.net or 0) >= 0 and palette.green or palette.red, true)
+    end
+
+    totalsLine(totalsRow + 1, "last 5 min", view.total5m)
+    totalsLine(totalsRow + 2, "last 1 h", view.total1h)
+
     if view.problems and view.problems > 0 then
-        graphics.text(x + column, gridRow + 3,
+        graphics.text(x + 64, totalsRow + 1,
             "⚠ maintenance: " .. view.problems, palette.amber, true)
     end
 
     -- Graph -----------------------------------------------------------------
-    local graphTop = gridRow + 5
+    local graphTop = totalsRow + 5
     -- Cap the height: on a tall screen an uncapped graph swallows the panel and
     -- the numbers above it stop being the focus.
     local graphRows = math.min(bottom - graphTop, 12)

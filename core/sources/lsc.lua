@@ -64,8 +64,20 @@ function lsc.read(proxy, lines)
     end
     local capacity, capacityText = sensor.bestValue(lines, "^%s*Total Capacity")
 
-    local euIn = util.callNumber(proxy, "getEUInputAverage") or sensor.value(lines, "^%s*EU IN")
-    local euOut = util.callNumber(proxy, "getEUOutputAverage") or sensor.value(lines, "^%s*EU OUT")
+    -- Sensor text FIRST, getters as the fallback — the reverse of the obvious
+    -- order, for two reasons.
+    --
+    -- The sensor lines are what GregTech shows in the machine's own GUI, and the
+    -- LSC renders them from the figures it tracks for its energy hatches.
+    -- getEUInputAverage() is the generic BaseMetaTileEntity counter, which is not
+    -- the same thing for a multiblock.
+    --
+    -- And `getter() or sensor` was outright broken: zero is TRUE in Lua, so a
+    -- getter answering 0 short-circuits and the sensor is never consulted. The
+    -- buffer then reads as IDLE with no flow while the sensor plainly says
+    -- otherwise.
+    local euIn = sensor.value(lines, "^%s*EU IN") or util.callNumber(proxy, "getEUInputAverage")
+    local euOut = sensor.value(lines, "^%s*EU OUT") or util.callNumber(proxy, "getEUOutputAverage")
 
     local reading = {
         stored = stored or 0,
@@ -81,16 +93,24 @@ function lsc.read(proxy, lines)
 
     -- GTNH already tracks long-window averages, so use them instead of
     -- recomputing our own (NIDAS sampled these itself over a tick counter).
-    local avg5m = sensor.find(lines, "Avg EU IN.*5 minutes")
-    local avg5mOut = sensor.find(lines, "Avg EU OUT.*5 minutes")
-    if avg5m and avg5mOut then
-        reading.avg5m = (sensor.amount(avg5m) or 0) - (sensor.amount(avg5mOut) or 0)
+    --
+    -- In and out are kept apart rather than collapsed into a net rate: from the
+    -- pair the monitor can report how much energy actually moved each way over
+    -- the window, which is the question "how much did I use in the last hour?"
+    -- A net rate cannot answer that — it hides a busy hour that happened to
+    -- balance out as an idle one.
+    local function windowRates(window)
+        local inLine = sensor.find(lines, "Avg EU IN.*" .. window)
+        local outLine = sensor.find(lines, "Avg EU OUT.*" .. window)
+        if not inLine or not outLine then return nil, nil end
+        return sensor.amount(inLine) or 0, sensor.amount(outLine) or 0
     end
-    local avg1h = sensor.find(lines, "Avg EU IN.*1 hour")
-    local avg1hOut = sensor.find(lines, "Avg EU OUT.*1 hour")
-    if avg1h and avg1hOut then
-        reading.avg1h = (sensor.amount(avg1h) or 0) - (sensor.amount(avg1hOut) or 0)
-    end
+
+    reading.avg5mIn, reading.avg5mOut = windowRates("5 minutes")
+    if reading.avg5mIn then reading.avg5m = reading.avg5mIn - reading.avg5mOut end
+
+    reading.avg1hIn, reading.avg1hOut = windowRates("1 hour")
+    if reading.avg1hIn then reading.avg1h = reading.avg1hIn - reading.avg1hOut end
 
     if reading.problems > 0 then
         reading.state = states.PROBLEM

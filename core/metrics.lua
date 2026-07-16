@@ -112,6 +112,17 @@ function metrics.average(tracker, now, window)
     return slope(tracker.slow, now, window)
 end
 
+-- Energy moved over a window, from an average rate in EU/t.
+--
+-- This is what turns "averaging 32.8k EU/t over the last hour" into "received
+-- 2.36G EU in the last hour" — the same fact, but the second one answers the
+-- question people actually ask. Returns nil when the rate is unknown, so a
+-- missing figure stays visibly missing rather than reading as zero.
+function metrics.energyOver(rate, seconds)
+    if not rate then return nil end
+    return rate * seconds * TICKS_PER_SECOND
+end
+
 -- Seconds until full (net > 0) or empty (net < 0).
 -- Returns: seconds, direction ("full" | "empty"), or nil when static.
 function metrics.projection(stored, capacity, net)

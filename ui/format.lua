@@ -35,6 +35,13 @@ function format.rate(value)
     return sign .. parser.metricNumber(value) .. " " .. format.UNIT .. "/t"
 end
 
+-- A signed amount of energy — not a rate. "+7.2G EU" over some window.
+function format.delta(value)
+    if value == nil then return "--" end
+    local sign = value > 0 and "+" or ""
+    return sign .. parser.metricNumber(value) .. " " .. format.UNIT
+end
+
 -- Unsigned rate, for IN/OUT columns where the direction is already the label.
 function format.magnitude(value)
     return parser.metricNumber(math.abs(value or 0)) .. " " .. format.UNIT .. "/t"

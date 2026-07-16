@@ -325,16 +325,38 @@ eq("lsc is online when power flows", reading.state, states.ONLINE)
 -- GTNH computes these windows itself, so ARGUS uses them rather than resampling.
 eq("lsc takes the 5-minute average from the sensor", reading.avg5m, 26000)
 eq("lsc takes the 1-hour average from the sensor", reading.avg1h, 20000)
+-- In and out are kept apart: a net rate cannot say how much actually moved.
+eq("lsc reports 5-minute input separately", reading.avg5mIn, 28000)
+eq("lsc reports 5-minute output separately", reading.avg5mOut, 2000)
+eq("lsc reports 1-hour input separately", reading.avg1hIn, 25000)
+eq("lsc reports 1-hour output separately", reading.avg1hOut, 5000)
 check("lsc reports wireless mode", reading.wireless ~= nil and reading.wireless.enabled == true)
 eq("lsc reads the wireless balance", reading.wireless.stored, 9876543210)
 
--- Prefer the structured getters for rates when they exist.
+-- The sensor wins over the getters.
+--
+-- This order matters and used to be reversed. Zero is TRUE in Lua, so
+-- `getter() or sensor` short-circuits on a getter that answers 0 and the sensor
+-- is never read — the buffer then sits at IDLE with no flow while the sensor
+-- plainly reports 32,768 EU/t. getAverageElectricInput() is the generic
+-- BaseMetaTileEntity counter, not what a multiblock's energy hatches moved.
 reading = lsc.read(proxy(lscSensor(), {
-    getEUInputAverage = function() return 12345 end,
-    getEUOutputAverage = function() return 678 end,
+    getEUInputAverage = function() return 0 end,
+    getEUOutputAverage = function() return 0 end,
 }), lines)
-eq("lsc prefers getEUInputAverage", reading.euIn, 12345)
-eq("lsc prefers getEUOutputAverage", reading.euOut, 678)
+eq("a zero getter does not mask the sensor's EU IN", reading.euIn, 32768)
+eq("a zero getter does not mask the sensor's EU OUT", reading.euOut, 0)
+eq("and the buffer is not reported idle", reading.state, states.ONLINE)
+
+-- The getters still serve when the sensor says nothing.
+local noRates = lscSensor()
+table.remove(noRates, 9) -- "EU OUT"
+table.remove(noRates, 8) -- "EU IN"
+local noRateLines = require("core.sensor").lines(proxy(noRates))
+reading = lsc.read(proxy(noRates, {
+    getEUInputAverage = function() return 12345 end,
+}), noRateLines)
+eq("the getter is used when the sensor lacks the line", reading.euIn, 12345)
 
 -- Maintenance and disabled states.
 local brokenLines = require("core.sensor").lines(
@@ -512,6 +534,37 @@ check("monitor builds an aggregate", aggregate ~= nil)
 -- The aggregate must sum only real buffers; counting the wireless view too
 -- would double-count energy that is not in the capacitor.
 eq("aggregate sums real buffers only", aggregate.stored, 1234567890)
+
+-- Energy moved over a window -----------------------------------------------------
+--
+-- The question is "how much did I use in the last hour", not "what was the
+-- average rate". A rate in EU/t over N seconds is rate * N * 20 ticks.
+
+eq("a rate becomes energy over a window", metrics.energyOver(100, 60), 100 * 60 * 20)
+eq("an unknown rate stays unknown", metrics.energyOver(nil, 60), nil)
+
+-- 28,000 EU/t in over 5 minutes = 28000 * 300 * 20.
+eq("5-minute received is the input average over the window",
+    view.total5m.received, 28000 * 300 * 20)
+eq("5-minute sent is the output average over the window",
+    view.total5m.sent, 2000 * 300 * 20)
+eq("5-minute net is the difference over the window",
+    view.total5m.net, 26000 * 300 * 20)
+eq("1-hour received spans the hour", view.total1h.received, 25000 * 3600 * 20)
+eq("1-hour net spans the hour", view.total1h.net, 20000 * 3600 * 20)
+
+-- The three columns are read side by side, so they must add up. A net measured
+-- independently of the in/out it sits next to makes the panel look broken.
+eq("5-minute net equals received minus sent",
+    view.total5m.net, view.total5m.received - view.total5m.sent)
+eq("1-hour net equals received minus sent",
+    view.total1h.net, view.total1h.received - view.total1h.sent)
+
+-- The wireless network reports no throughput, so its totals are unknown rather
+-- than a confident zero.
+eq("a wireless view has no received total", wirelessView.total5m.received, nil)
+-- ...but its net still comes from watching the balance move.
+check("a wireless view still has a measured rate", wirelessView.net ~= nil)
 
 eq("resolve falls back to the aggregate for an unknown id",
     monitor:resolve("nope").id, monitorLib.AGGREGATE_ID)
