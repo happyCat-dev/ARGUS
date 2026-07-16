@@ -1051,6 +1051,66 @@ eq("the tunnel reply carries no address", link.sent[1][1], netTransport.PROTOCOL
 eq("the tunnel reply carries the network key", link.sent[1][2], tunnelTransport:key())
 eq("the tunnel reply names the command", link.sent[1][3], "status")
 
+-- Module cache purge -------------------------------------------------------------
+--
+-- init.lua drops our own modules from package.loaded on startup, because OpenOS
+-- keeps one require cache for the whole boot session. A namespace missing from
+-- that list is invisible until an update touches it, and then it surfaces as a
+-- method that plainly exists in the file being nil — which is exactly what
+-- happened when `net` was added and the list was not.
+--
+-- Same shape as the manifest check below: compare the declared list against
+-- what actually loads, rather than trusting that someone remembered.
+
+local function fileContents(path)
+    local handle = io.open(path, "r")
+    if not handle then return nil end
+    local body = handle:read("*a")
+    handle:close()
+    return body
+end
+
+local initSource = fileContents("init.lua")
+check("init.lua is readable", initSource ~= nil)
+
+if initSource then
+    local block = initSource:match("local OWN_MODULES = {(.-)}")
+    check("init.lua declares a purge list", block ~= nil)
+
+    local patterns = {}
+    for pattern in (block or ""):gmatch('"([^"]+)"') do
+        table.insert(patterns, pattern)
+    end
+    check("the purge list has entries", #patterns > 0)
+
+    local function purged(name)
+        for _, pattern in ipairs(patterns) do
+            if name:match(pattern) then return true end
+        end
+        return false
+    end
+
+    for name in pairs(package.loaded) do
+        if name:match("^lib%.") or name:match("^core") or name:match("^ui%.")
+            or name == "ar" or name:match("^ar%.") or name == "net"
+            or name:match("^net%.") or name == "config" or name == "version" then
+            check("init.lua purges " .. name, purged(name),
+                "add a pattern covering '" .. name .. "' to OWN_MODULES in init.lua")
+        end
+    end
+
+    -- The regression itself: net is the namespace that was missed.
+    check("net is purged", purged("net"))
+    check("net.server is purged", purged("net.server"))
+
+    -- And the list must not be so broad it evicts OpenOS's own libraries, which
+    -- would be a far worse bug than the one it prevents.
+    for _, stdlib in ipairs({"component", "computer", "filesystem", "event",
+                             "serialization", "term", "shell", "string", "table"}) do
+        check("the purge list spares " .. stdlib, not purged(stdlib))
+    end
+end
+
 -- Installer manifest -----------------------------------------------------------
 --
 -- setup.lua lists every file to download. A module that exists in the repo but

@@ -20,8 +20,14 @@ package.path = "/home/ARGUS/?.lua;/home/ARGUS/?/init.lua;" .. package.path
 -- `attempt to call a nil value` on functions that plainly exist on disk.
 --
 -- Purging here means `init` alone picks up an update, with no reboot.
+--
+-- EVERY namespace this app ships must be listed. A missing one is invisible
+-- until an update changes that module, and then it fails as a method that
+-- plainly exists being nil — `net` was forgotten when distributed mode landed
+-- and did exactly that. tests/run.lua checks this list against what actually
+-- loads, so a new namespace cannot be forgotten again.
 local OWN_MODULES = {"^lib%.", "^core$", "^core%.", "^ui%.", "^ar$", "^ar%.",
-                     "^config$", "^version$"}
+                     "^net$", "^net%.", "^config$", "^version$"}
 for name in pairs(package.loaded) do
     for _, pattern in ipairs(OWN_MODULES) do
         if name:match(pattern) then
