@@ -92,6 +92,9 @@ local FILES = {
     "ui/app.lua",
     "ar/init.lua",
     "ar/panel.lua",
+    "net/init.lua",
+    "net/server.lua",
+    "net/client.lua",
     "tools/sensordump.lua",
 }
 

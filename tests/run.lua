@@ -73,8 +73,43 @@ package.preload["filesystem"] = function()
         path = function(p) return p:match("^(.*)/[^/]*$") or "/" end,
     }
 end
+-- A real round trip, not a stub. The distributed protocol serializes readings
+-- onto the wire and back, so a fake that cannot actually restore a table would
+-- test nothing. Models OpenOS's serialization: a Lua table literal, loaded back.
 package.preload["serialization"] = function()
-    return {serialize = tostring, unserialize = function() return nil end}
+    local function encode(value)
+        local kind = type(value)
+        if kind == "table" then
+            local parts = {}
+            for key, item in pairs(value) do
+                local encodedKey
+                if type(key) == "string" and key:match("^[%a_][%w_]*$") then
+                    encodedKey = key
+                else
+                    encodedKey = "[" .. encode(key) .. "]"
+                end
+                table.insert(parts, encodedKey .. "=" .. encode(item))
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        elseif kind == "string" then
+            return string.format("%q", value)
+        elseif kind == "number" or kind == "boolean" or kind == "nil" then
+            return tostring(value)
+        end
+        -- Functions and userdata cannot cross the wire; OC raises here too.
+        error("cannot serialize " .. kind)
+    end
+
+    return {
+        serialize = function(value) return encode(value) end,
+        unserialize = function(text)
+            local chunk = load("return " .. tostring(text))
+            if not chunk then return nil end
+            local ok, result = pcall(chunk)
+            if not ok then return nil end
+            return result
+        end,
+    }
 end
 
 -- widgets.prompt blocks on event.pull; nothing here exercises it interactively.
@@ -753,6 +788,211 @@ eq("the custom name reaches the view", namedMonitor:get("named-lsc").name, "Reac
 -- Including the wireless view hanging off it.
 eq("the custom name reaches the wireless view",
     namedMonitor:get("named-lsc:wireless").name, "Reactor bank · Wireless")
+
+-- Distributed mode --------------------------------------------------------------
+--
+-- Component networks cannot be bridged (a Relay passes messages and explicitly
+-- does not expose components), so a remote base sends finished NUMBERS. These
+-- tests drive the wire protocol end to end with a fake modem.
+
+local netTransport = require("net")
+local netServer = require("net.server")
+local netClient = require("net.client")
+
+-- A modem records what it sent and reports which port was opened. The tunnel
+-- variant models a Linked Card: send() takes no address because there is
+-- exactly one peer.
+local function fakeCard(kind)
+    local card = {kind = kind, sent = {}, opened = {}}
+    card.open = method(function(port) card.opened[port] = true return true end)
+    card.close = method(function(port) card.opened[port] = nil return true end)
+    if kind == "tunnel" then
+        card.send = method(function(...) table.insert(card.sent, {...}) return true end)
+    else
+        card.broadcast = method(function(...) table.insert(card.sent, {...}) return true end)
+        card.send = method(function(...) table.insert(card.sent, {...}) return true end)
+    end
+    return card
+end
+
+local serverModem = fakeCard("modem")
+fakeComponents["server-modem"] = serverModem
+fakeTypes["server-modem"] = "modem"
+
+local netConfig = {
+    network = {role = "server", port = 4242, pollInterval = 2, timeout = 15, name = "Main"},
+    screen = {graphWindow = 600},
+    buffers = {},
+}
+
+local transport = netTransport.new(netConfig)
+local netMonitor = monitorLib.new(netConfig)
+local srv = netServer.new(netConfig, transport)
+
+clock = 1000
+netMonitor:update()
+srv:update(netMonitor)
+
+check("the server opens its port", serverModem.opened[4242] == true)
+check("the server broadcasts a poll", #serverModem.sent > 0)
+eq("the poll is tagged with the protocol", serverModem.sent[1][2], netTransport.PROTOCOL)
+eq("the poll goes out on the configured port", serverModem.sent[1][1], 4242)
+eq("the poll names the command", serverModem.sent[1][3], "poll")
+
+-- The server must not re-poll before its interval elapses.
+local afterFirst = #serverModem.sent
+srv:update(netMonitor)
+eq("the server does not re-poll early", #serverModem.sent, afterFirst)
+clock = clock + 5
+srv:update(netMonitor)
+check("the server polls again after the interval", #serverModem.sent > afterFirst)
+
+-- A client answers with its buffers ---------------------------------------------
+
+local clientModem = fakeCard("modem")
+local clientComponents = {["client-modem"] = clientModem}
+local clientConfig = {
+    network = {role = "client", port = 4242, name = "Mining outpost"},
+    screen = {graphWindow = 600},
+    buffers = {{address = "lsc-address", name = "Outpost LSC", kind = "lsc", enabled = true}},
+}
+
+-- Point the shared component stub at the client's card for this stretch.
+fakeComponents["client-modem"] = clientModem
+fakeTypes["client-modem"] = "modem"
+fakeComponents["server-modem"] = nil
+fakeTypes["server-modem"] = nil
+
+local clientTransport = netTransport.new(clientConfig)
+local clientMonitor = monitorLib.new(clientConfig)
+local cli = netClient.new(clientConfig, clientTransport)
+
+clock = 1100
+clientMonitor:update()
+
+local payload = cli:payload(clientMonitor)
+eq("the client reports its node name", payload.name, "Mining outpost")
+check("the client reports its buffers", #payload.buffers > 0)
+
+-- The tracker holds hundreds of samples; it must never reach the wire.
+for _, buffer in ipairs(payload.buffers) do
+    eq("no tracker is serialized for " .. tostring(buffer.name), buffer.tracker, nil)
+end
+
+-- The aggregate is the server's job across every base; forwarding it would
+-- double-count.
+for _, buffer in ipairs(payload.buffers) do
+    check("the aggregate is not forwarded", buffer.id ~= monitorLib.AGGREGATE_ID)
+end
+
+-- The exact decimal string must survive the wire: an LSC past 2^53 cannot be
+-- represented as a double, so losing the string would silently round the figure.
+local lscBuffer
+for _, buffer in ipairs(payload.buffers) do
+    if buffer.id == "lsc-address" then lscBuffer = buffer end
+end
+check("the LSC is in the payload", lscBuffer ~= nil)
+eq("the exact stored string is carried over the wire", lscBuffer.storedText, "1234567890")
+eq("the custom name is carried over the wire", lscBuffer.name, "Outpost LSC")
+
+-- A poll gets answered.
+cli:onMessage(clientMonitor, "client-modem", "server-address", 4242, "poll")
+check("the client answers a poll", #clientModem.sent > 0)
+local answer = clientModem.sent[#clientModem.sent]
+eq("the answer goes to the caller", answer[1], "server-address")
+eq("the answer is tagged with the protocol", answer[3], netTransport.PROTOCOL)
+eq("the answer names the command", answer[4], "status")
+
+-- A client ignores commands meant for nobody in particular.
+local before = #clientModem.sent
+eq("the client ignores an unknown command",
+    cli:onMessage(clientMonitor, "client-modem", "server-address", 4242, "nonsense"), false)
+eq("nothing was sent for an unknown command", #clientModem.sent, before)
+
+-- The server folds the answer in ------------------------------------------------
+
+local encoded = require("serialization").serialize(payload)
+
+clock = 2000
+srv:onMessage(netMonitor, "server-modem", "outpost-address", 4242, 120, "status", encoded)
+netMonitor:update()
+
+eq("the server lists one client", #srv:list(), 1)
+eq("the client is named", srv:list()[1].name, "Mining outpost")
+eq("the client's distance is recorded", srv:list()[1].distance, 120)
+
+-- Namespaced by node so two bases running the same machine cannot collide.
+local remoteId = "net:" .. ("outpost-address"):sub(1, 8) .. ":lsc-address"
+local remoteView = netMonitor:get(remoteId)
+check("a remote buffer becomes a view", remoteView ~= nil)
+eq("the remote view is marked remote", remoteView.remote, true)
+-- Prefixed with the node, or two bases with the same machine are indistinguishable.
+check("the remote view carries the node name", remoteView.name:find("Mining outpost", 1, true) ~= nil)
+
+-- "All buffers" that quietly meant "this network only" would be worse than useless.
+local netAggregate = netMonitor:get(monitorLib.AGGREGATE_ID)
+check("remote buffers reach the aggregate", netAggregate.stored > 0)
+
+-- Watchdog: wireless has no link-down signal, so silence is the only symptom.
+clock = 2000 + 60
+srv:update(netMonitor)
+netMonitor:update()
+check("a silent client is marked offline", srv:list()[1].offline == true)
+eq("a stale remote buffer reads as MISSING", netMonitor:get(remoteId).state, states.MISSING)
+-- Its last-known numbers must not be counted as live.
+local staleAggregate = netMonitor:get(monitorLib.AGGREGATE_ID)
+eq("an offline base leaves the aggregate", staleAggregate.stored, 0)
+
+-- A fresh answer brings it back.
+clock = 2100
+srv:onMessage(netMonitor, "server-modem", "outpost-address", 4242, 120, "status", encoded)
+netMonitor:update()
+eq("a client that answers again is online", srv:list()[1].offline, false)
+check("its buffers return to the aggregate", netMonitor:get(monitorLib.AGGREGATE_ID).stored > 0)
+
+srv:forget("outpost-address")
+srv:publish(netMonitor)
+netMonitor:update()
+eq("forgetting a client drops it", #srv:list(), 0)
+eq("its buffers go with it", netMonitor:get(remoteId), nil)
+
+-- Garbage on the port must not take the server down.
+local survived = pcall(function()
+    srv:onMessage(netMonitor, "server-modem", "junk", 4242, 0, "status", "not serialized lua {{{")
+end)
+check("malformed payloads are survivable", survived)
+eq("garbage adds no client", #srv:list(), 0)
+
+-- Roles are inert unless selected -----------------------------------------------
+
+netConfig.network.role = "client"
+local quietSent = #serverModem.sent
+srv:update(netMonitor)
+eq("a server does nothing while the role is client", #serverModem.sent, quietSent)
+
+clientConfig.network.role = "server"
+local quietClient = #clientModem.sent
+eq("a client does not answer while the role is server",
+    cli:onMessage(clientMonitor, "client-modem", "server-address", 4242, "poll"), false)
+eq("and sends nothing", #clientModem.sent, quietClient)
+
+-- A Linked Card carries the same protocol --------------------------------------
+
+fakeComponents["client-modem"] = nil
+fakeTypes["client-modem"] = nil
+local link = fakeCard("tunnel")
+fakeComponents["link-card"] = link
+fakeTypes["link-card"] = "tunnel"
+
+clientConfig.network.role = "client"
+local tunnelTransport = netTransport.new(clientConfig)
+local tunnelClient = netClient.new(clientConfig, tunnelTransport)
+tunnelClient:onMessage(clientMonitor, "link-card", "server-address", 0, "poll")
+
+check("a tunnel answers a poll", #link.sent > 0)
+-- send() on a Linked Card takes no address: it has exactly one peer.
+eq("the tunnel reply carries no address", link.sent[1][1], netTransport.PROTOCOL)
+eq("the tunnel reply names the command", link.sent[1][2], "status")
 
 -- Installer manifest -----------------------------------------------------------
 --

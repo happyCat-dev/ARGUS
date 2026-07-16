@@ -6,10 +6,12 @@
 -- hardware requirement down.
 
 local component = require("component")
+local computer = require("computer")
 
 local graphics = require("lib.graphics.graphics")
 local palette = require("lib.graphics.colors")
 local text = require("lib.utils.text")
+local time = require("lib.utils.time")
 
 local configuration = require("config")
 local monitorLib = require("core.monitor")
@@ -41,13 +43,15 @@ local function buildLabel()
     return ref and (label .. " @" .. ref) or label
 end
 
--- `hud` is optional: the Glasses page uses it to report the viewport detected
--- from glasses_on, but nothing breaks without it.
-function app.new(monitor, config, hud)
+-- `hud` and `server` are optional: the Glasses page uses hud to report the
+-- viewport detected from glasses_on, and the Network page uses server to list
+-- connected clients. Neither is required for the app to run.
+function app.new(monitor, config, hud, server)
     return setmetatable({
         monitor = monitor,
         config = config,
         hud = hud,
+        server = server,
         page = "dashboard",
         running = true,
         dirty = true,
@@ -396,6 +400,154 @@ function app:drawGlasses(width, rows, theme)
     graphics.text(2, row, "Changes apply instantly. Press Save to keep them.", theme.muted, true)
 end
 
+local ROLES = {"standalone", "server", "client"}
+
+local ROLE_HELP = {
+    standalone = "this computer only — no networking",
+    server     = "collects buffers from the clients below and shows them alongside its own",
+    client     = "answers a server's polls with this base's buffers",
+}
+
+function app:drawNetwork(width, rows, theme)
+    local network = self.config.network
+
+    graphics.text(2, 1, "Network", theme.primary, true)
+    graphics.text(10, 1, "· one server, one client per remote base", theme.muted, true)
+    panel.rule(2, 2, width - 2, theme)
+
+    local row = 4
+    local function label(name) graphics.text(2, row, name, theme.muted, true) end
+
+    -- Role -------------------------------------------------------------------
+    label("Role")
+    local x = 14
+    for _, role in ipairs(ROLES) do
+        x = x + widgets.button(x, row, role, theme, function()
+            network.role = role
+            self.dirty = true
+        end, nil, network.role == role) + 1
+    end
+    row = row + 1
+    graphics.text(14, row, ROLE_HELP[network.role] or "", theme.muted, true)
+    row = row + 2
+
+    -- Settings ---------------------------------------------------------------
+    local function typeNumber(key, low, high, suffix)
+        return function()
+            local typed = widgets.prompt(2, rows - 2, 20, network[key] or 0, theme, true)
+            local value = tonumber(typed)
+            if value then
+                network[key] = math.floor(math.min(high, math.max(low, value)))
+                self:notify(key .. ": " .. network[key] .. (suffix or ""))
+            end
+            self.dirty = true
+        end
+    end
+
+    label("Port")
+    -- Both ends must agree, and a modem silently drops messages on a port it
+    -- has not opened — so a mismatch looks exactly like "no clients".
+    x = 14 + widgets.button(14, row, tostring(network.port), theme,
+        typeNumber("port", 1, 65535), nil, false) + 2
+    graphics.text(x, row, "must match on every base", theme.muted, true)
+    row = row + 1
+
+    label("This node")
+    x = 14 + widgets.button(14, row, self.server and self.server.transport:nodeName() or "?",
+        theme, function()
+            local typed = widgets.prompt(2, rows - 2, 32, network.name or "", theme)
+            if typed then
+                typed = typed:gsub("^%s+", ""):gsub("%s+$", "")
+                network.name = (typed ~= "") and typed or nil
+            end
+            self.dirty = true
+        end, nil, false) + 2
+    graphics.text(x, row, "name this base reports to the server", theme.muted, true)
+    row = row + 1
+
+    if network.role == "server" then
+        label("Poll")
+        x = 14 + widgets.button(14, row, (network.pollInterval or 2) .. "s", theme,
+            typeNumber("pollInterval", 1, 60, "s"), nil, false) + 2
+        x = x + widgets.button(x, row, "timeout " .. (network.timeout or 15) .. "s", theme,
+            typeNumber("timeout", 5, 300, "s"), nil, false) + 2
+        graphics.text(x, row, "silence longer than the timeout marks a base offline",
+            theme.muted, true)
+        row = row + 1
+    end
+    row = row + 1
+
+    -- Cards ------------------------------------------------------------------
+    label("Cards")
+    local modems, tunnels = 0, 0
+    if self.server then
+        for _, card in pairs(self.server.transport:cardList()) do
+            if card.kind == "tunnel" then tunnels = tunnels + 1 else modems = modems + 1 end
+        end
+    end
+    if modems + tunnels == 0 then
+        graphics.text(14, row, "none — install a Network Card, Wireless Network Card,",
+            palette.amber, true)
+        graphics.text(14, row + 1, "or a Linked Card (crosses dimensions, pairs 1:1)",
+            palette.amber, true)
+        row = row + 2
+    else
+        graphics.text(14, row, string.format("%d modem, %d tunnel (linked card)", modems, tunnels),
+            theme.text, true)
+        row = row + 1
+    end
+    row = row + 1
+
+    -- Clients ----------------------------------------------------------------
+    if network.role ~= "server" then
+        graphics.text(2, row, "Switch to `server` to see connected clients here.",
+            theme.muted, true)
+        return
+    end
+
+    local nodes = self.server and self.server:list() or {}
+    panel.rule(2, row, width - 2, theme)
+    row = row + 1
+    graphics.text(2, row, "Clients (" .. #nodes .. ")", theme.primary, true)
+    row = row + 1
+
+    if #nodes == 0 then
+        graphics.text(2, row, "None yet. On the other base: set role to `client`, use the",
+            theme.muted, true)
+        graphics.text(2, row + 1, "same port, and make sure a card links the two (wireless",
+            theme.muted, true)
+        graphics.text(2, row + 2, "range is 400 blocks at T2 and does not cross dimensions).",
+            theme.muted, true)
+        return
+    end
+
+    local now = computer.uptime()
+    for _, node in ipairs(nodes) do
+        if row > rows - 3 then break end
+        local age = now - node.lastSeen
+        local status = node.offline and "OFFLINE" or "online"
+        local color = node.offline and palette.red or palette.green
+
+        graphics.text(2, row, text.fit(node.name, 26), theme.text, true)
+        graphics.text(29, row, node.address:sub(1, 8), theme.muted, true)
+        graphics.text(39, row, #(node.buffers or {}) .. " buf", theme.muted, true)
+        graphics.text(47, row, status, color, true)
+        -- Distance is 0 over a wired modem or a linked card, which is not a
+        -- fault — only a wireless hop has one.
+        local detail = time.format(math.floor(age)) .. " ago"
+        if (node.distance or 0) > 0 then
+            detail = detail .. string.format("  %.0f blocks", node.distance)
+        end
+        graphics.text(57, row, detail, theme.muted, true)
+
+        widgets.button(width - 11, row, "forget", theme, function()
+            self.server:forget(node.address)
+            self.dirty = true
+        end, nil, false)
+        row = row + 1
+    end
+end
+
 -- Frame ---------------------------------------------------------------------
 
 function app:footer(width, rows, theme)
@@ -414,6 +566,10 @@ function app:footer(width, rows, theme)
     x = x + widgets.button(x, row, "Glasses", theme, function()
         self.page = "glasses" self.dirty = true
     end, nil, self.page == "glasses") + 1
+
+    x = x + widgets.button(x, row, "Network", theme, function()
+        self.page = "network" self.dirty = true
+    end, nil, self.page == "network") + 1
 
     x = x + widgets.button(x, row, "Graph: " .. format.window(self.config.screen.graphWindow or 600),
         theme, function() self:nextGraphWindow() self.dirty = true end, nil, false) + 1
@@ -448,6 +604,8 @@ function app:draw()
         self:drawBuffers(width, rows, theme)
     elseif self.page == "glasses" then
         self:drawGlasses(width, rows, theme)
+    elseif self.page == "network" then
+        self:drawNetwork(width, rows, theme)
     else
         self:drawDashboard(width, rows, theme)
     end

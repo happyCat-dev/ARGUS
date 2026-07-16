@@ -35,7 +35,18 @@ function monitor.new(config)
         trackers = {},
         views = {},
         order = {},
+        remote = {},
     }, monitor)
+end
+
+-- Readings from other bases, supplied by the server role (net/server.lua).
+--
+-- Held apart from config.buffers because they are not components on this
+-- network and must never be polled locally — component networks cannot be
+-- bridged, which is the whole reason distributed mode exists. They still become
+-- ordinary views, so every renderer treats them like any other buffer.
+function monitor:setRemote(list)
+    self.remote = list or {}
 end
 
 -- Sample spacing the graph should currently use, from the chosen window.
@@ -147,6 +158,31 @@ function monitor:update()
                 add(wirelessView)
             end
         end
+    end
+
+    -- Remote buffers. Folded into the aggregate on purpose: "all buffers" that
+    -- silently meant "all buffers on this one network" would be worse than
+    -- useless on a multi-base setup.
+    for _, reading in ipairs(self.remote or {}) do
+        -- Copy: buildView decorates the table it is handed, and these are owned
+        -- by the server and reused between polls.
+        local base = {}
+        for key, value in pairs(reading) do base[key] = value end
+
+        local view = self:buildView(base.id, base, now)
+        view.remote = true
+        add(view)
+
+        if view.state ~= states.MISSING then
+            total.stored = total.stored + (view.stored or 0)
+            total.capacity = total.capacity + (view.capacity or 0)
+            total.euIn = total.euIn + (view.euIn or 0)
+            total.euOut = total.euOut + (view.euOut or 0)
+            total.passiveLoss = total.passiveLoss + (view.passiveLoss or 0)
+            total.members = total.members + 1
+        end
+        total.problems = total.problems + (view.problems or 0)
+        total.state = worstState(total.state, view.state)
     end
 
     total.state = total.state or states.MISSING

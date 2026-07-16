@@ -37,6 +37,28 @@ local function defaults()
             pollInterval = 0.4,
         },
 
+        -- Distributed mode.
+        --
+        -- OpenComputers cannot join component networks wirelessly — that is a
+        -- deliberate design of the mod, not a limitation to work around (a Relay
+        -- passes messages and explicitly does not expose components). So a
+        -- remote base runs its own ARGUS as a `client`, reads its own buffers
+        -- locally, and sends finished numbers to the `server`.
+        network = {
+            role = "standalone", -- standalone | server | client
+            port = 42069,
+            -- Shown on the server's Network page. Defaults to the computer's
+            -- own address when unset.
+            name = nil,
+            -- Server: seconds between polls of its clients. Deliberately slower
+            -- than the local poll — this is network traffic, and a remote base's
+            -- charge does not need sub-second freshness.
+            pollInterval = 2,
+            -- Server: seconds without an answer before a client is OFFLINE.
+            -- Wireless has no link-down signal, so silence is the only symptom.
+            timeout = 15,
+        },
+
         -- AR HUD, keyed by glasses component address.
         -- source: a view id, or nil for the aggregate.
         -- cycle:  rotate through every view instead of pinning one.

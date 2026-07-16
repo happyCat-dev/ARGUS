@@ -46,6 +46,10 @@ local sources = require("core.sources")
 local app = require("ui.app")
 local arHud = require("ar")
 
+local netTransport = require("net")
+local netServer = require("net.server")
+local netClient = require("net.client")
+
 -- How often the loop wakes to animate. Component polling runs on its own,
 -- slower schedule (config.screen.pollInterval).
 local ANIMATION_INTERVAL = 0.1
@@ -92,7 +96,15 @@ local function run()
     local hasScreen = setupScreen(config)
     local monitor = monitorLib.new(config)
     local hud = arHud.new(config)
-    local application = app.new(monitor, config, hud)
+
+    -- Both roles are constructed regardless of the configured one: each is inert
+    -- unless config.network.role names it, and building both means switching
+    -- role in the UI takes effect without a restart.
+    local transport = netTransport.new(config)
+    local server = netServer.new(config, transport)
+    local client = netClient.new(config, transport)
+
+    local application = app.new(monitor, config, hud, server)
 
     if not hasScreen then
         config.screen.enabled = false
@@ -108,6 +120,12 @@ local function run()
         -- schedule. Animation must not be tied to it: when the two were the same
         -- tick, the bar could only move at the poll rate and jumped between
         -- readings instead of gliding.
+        -- Both self-throttle, so they can be called every tick. The server must
+        -- run first: it hands the monitor the remote readings that the update
+        -- below folds into the views and the aggregate.
+        server:update(monitor)
+        client:update()
+
         if (now - lastPoll) >= (config.screen.pollInterval or 0.4) then
             monitor:update()
             lastPoll = now
@@ -133,6 +151,19 @@ local function run()
         elseif name == "component_added" or name == "component_removed" then
             -- A buffer was plugged in or pulled; refresh the known component list.
             configuration.syncBuffers(config, sources.discover())
+        elseif name == "modem_message" then
+            -- modem_message(localAddress, remoteAddress, port, distance, ...)
+            -- A Linked Card delivers the same signal, which is what lets one
+            -- protocol serve both transports.
+            local localAddress, remoteAddress = signal[2], signal[3]
+            local port, distance = signal[4], signal[5]
+            -- The protocol tag keeps other programs sharing this port out.
+            if signal[6] == netTransport.PROTOCOL then
+                local command, payload = signal[7], signal[8]
+                server:onMessage(monitor, localAddress, remoteAddress, port, distance,
+                    command, payload)
+                client:onMessage(monitor, localAddress, remoteAddress, port, command)
+            end
         elseif name == "hud_click" or name == "hud_keyboard" or name == "glasses_on" then
             -- Input from the glasses themselves, so the wearer can switch source
             -- without walking back to the computer.
