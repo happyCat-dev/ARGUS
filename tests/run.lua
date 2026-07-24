@@ -1790,6 +1790,17 @@ do
     cardHud:update(monitor, craftMonitor)
     card = cardHud.craftPanels["glasses-1"].instance
 
+    -- The - key folds it too (45 = '-').
+    check("the - key folds the crafting card",
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 45, 0))
+    check("the - key set the collapsed flag", settings.craft.collapsed)
+    cardHud:update(monitor, craftMonitor)
+    check("the - key unfolds it again",
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 45, 0))
+    check("the - key cleared the collapsed flag", not settings.craft.collapsed)
+    cardHud:update(monitor, craftMonitor)
+    card = cardHud.craftPanels["glasses-1"].instance
+
     settings.craft.enabled = false
     cardHud:update(monitor, craftMonitor)
     eq("hud drops the crafting card when disabled", cardHud.craftPanels["glasses-1"], nil)
@@ -1903,6 +1914,18 @@ do
         foldedStock:hitTest(foldedStock.x + 40, foldedStock.y + 5), "stock:collapse")
     scHud:handleSignal(scMonitor, "hud_click", "Tester", foldedStock.x + 40, foldedStock.y + 5, 0)
     check("expanding clears the stock collapsed flag", not settings.stock.collapsed)
+    scHud:update(scMonitor, nil, scStock)
+    card = scHud.stockPanels["glasses-1"].instance
+
+    -- The = key folds it too (61 = '='). This pair of glasses wears only the
+    -- stock card, so it also proves the key arrives with no energy/craft card up.
+    check("the = key folds the stock card",
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 61, 0))
+    check("the = key set the stock collapsed flag", settings.stock.collapsed)
+    scHud:update(scMonitor, nil, scStock)
+    check("the = key unfolds it again",
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 61, 0))
+    check("the = key cleared the stock collapsed flag", not settings.stock.collapsed)
     scHud:update(scMonitor, nil, scStock)
     card = scHud.stockPanels["glasses-1"].instance
 
