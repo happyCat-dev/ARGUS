@@ -1,6 +1,6 @@
 -- ARGUS installer.
 --
---   wget -f https://cdn.jsdelivr.net/gh/happyCat-dev/ARGUS@v2.5.4/setup.lua && setup
+--   wget -f https://cdn.jsdelivr.net/gh/happyCat-dev/ARGUS@v2.5.5/setup.lua && setup
 --
 -- Note the `&&`: without it, a failed wget leaves the PREVIOUS setup.lua in
 -- place and `setup` cheerfully runs that instead, installing whatever ref that
@@ -37,11 +37,11 @@ local shell = require("shell")
 -- Use --branch=<commit-sha> to install an exact revision (also immutable).
 -- Use --branch=main only to test unreleased code.
 local REPO = "happyCat-dev/ARGUS"
-local BRANCH = "v2.5.4"
+local BRANCH = "v2.5.5"
 
 -- What this installer expects to find on disk afterwards. Checked at the end so
 -- a stale mirror is reported instead of passing as a clean install.
-local EXPECTED_VERSION = "2.5.4"
+local EXPECTED_VERSION = "2.5.5"
 
 local INSTALL_DIR = "/home/ARGUS"
 
@@ -273,14 +273,32 @@ end
 
 -- Autostart via /home/.shrc, which /etc/profile.lua sources on every shell
 -- login. `cd` first: OpenOS resolves program names against the working dir.
-io.write("Run ARGUS automatically on boot? [Y/n] ")
-local answer = (io.read() or ""):lower()
-if answer ~= "n" then
+--
+-- The question is skipped when it is already answered: `--yes` (the in-app
+-- updater passes it, so an update never stops for input), or an /home/.shrc that
+-- already launches ARGUS — a reinstall must not re-ask something the user settled
+-- long ago. Only a genuinely fresh install prompts.
+local function autostartConfigured()
+    local shrc = io.open("/home/.shrc", "r")
+    if not shrc then return false end
+    local body = shrc:read("*a") or ""
+    shrc:close()
+    return body:find(INSTALL_DIR, 1, true) ~= nil and body:find("init", 1, true) ~= nil
+end
+
+local enableAutostart
+if options.yes or autostartConfigured() then
+    enableAutostart = true
+    print("Autostart kept (/home/.shrc).")
+else
+    io.write("Run ARGUS automatically on boot? [Y/n] ")
+    enableAutostart = ((io.read() or ""):lower() ~= "n")
+end
+if enableAutostart then
     local shrc = io.open("/home/.shrc", "w")
     if shrc then
         shrc:write("cd " .. INSTALL_DIR .. "\ninit\ncd\n")
         shrc:close()
-        print("Autostart enabled (/home/.shrc).")
     else
         io.stderr:write("Could not write /home/.shrc; skipping autostart.\n")
     end
@@ -307,6 +325,18 @@ if installed ~= EXPECTED_VERSION then
         .. " landed on disk.")
     print("The mirror served a stale copy. Retry with:  setup --clean --mirror=raw")
 end
+-- An in-app update passes --yes: it has already answered every prompt, so finish
+-- the job by rebooting straight into the freshly installed code. The autostart
+-- line written above brings ARGUS back up — no manual cd + init, and a reboot
+-- (rather than re-running init here) guarantees no stale module lingers in the
+-- one shared Lua state. Reached only on success: a failed download returns far
+-- above this point, so a broken install never auto-reboots.
+if options.yes then
+    print("")
+    print("Update complete — rebooting into the new version…")
+    require("computer").shutdown(true)
+end
+
 print("")
 print("Start it now with:  cd " .. INSTALL_DIR .. " && init")
 print("Sensor diagnostics: cd " .. INSTALL_DIR .. " && tools/sensordump.lua")
