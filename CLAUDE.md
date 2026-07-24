@@ -191,6 +191,14 @@ components to computers in other networks"*. Server Rack — тот же `Hub`.
 **В командах обновления обязателен `&&`**: если `wget` упал, `setup` запустит **старый**
 `/home/setup.lua` и молча поставит не то.
 
+**Автообновление из приложения** (`core/update.lua`, страница Settings): проверка тянет
+`@latest/version.lua` через jsDelivr (raw недоступен), установка **пинится на тег** `@vX.Y.Z`
+(moving-ref кешируется CDN пофайлово) и делегируется свежему `setup.lua` — свой манифест
+файлов/зеркала/проверку версии модуль НЕ держит, единственный источник правды — установщик.
+Скачивание и запуск идут **после выхода из приложения** (флаг `pendingUpdate` → init.lua),
+чтобы большой fetch не висел за статичным кадром. Сетевые ветки не тестируются на десктопе —
+покрыты только чистые `parseVersion`/`tagFor`.
+
 ## Структура
 
 ```
@@ -203,13 +211,15 @@ core/
   sources/            адаптеры буферов (lsc, batterybuffer, ic2, energycontainer)
   monitor.lua         опрос, агрегат, виртуальные wireless-представления
   craft.lua           опрос CPU ME-сети, вывод цепочки и остановок
+  stock.lua           слежение за количеством предметов/жидкостей в ME-сети (per-buffer)
   metrics.lua         скорости, средние, прогноз, шаг графика
   ring.lua            кольцевой буфер (плоские массивы — экономия RAM)
+  update.lua          проверка/установка новой версии через jsDelivr → setup.lua
   util.lua            util.callable — см. грабли
 lib/graphics/         ar.lua (очки), graphics.lua (GPU + двойная буферизация), colors.lua
 lib/utils/            parser, screen, text, time
 ui/                   panel, graph, widgets, app, format
-ar/                   panel (энергия), craft (крафты), init (менеджер, ввод, cycle)
+ar/                   panel (энергия), craft (крафты), stock (предметы), init (менеджер, ввод, cycle)
 net/                  init (транспорт modem/tunnel), server (опрос+watchdog), client (ответы)
 tools/sensordump.lua  диагностика: все компоненты, геттеры, сырые строки, разбор
 tools/medump.lua      диагностика ME: CPU, наличие методов, сырые списки, разбор
@@ -228,7 +238,7 @@ LSC и энергохатч оба `gt_machine`, различаются толь
 
 ```shell
 lua tests/run.lua        # 419 проверок
-lua tests/preview.lua [dashboard|buffers|glasses|crafting|network]   # UI в текст
+lua tests/preview.lua [dashboard|buffers|glasses|crafting|network|stock]  # UI в текст
 ```
 
 Интерпретатора в системе может не быть — ставится `winget install --id=DEVCOM.Lua`,
@@ -268,6 +278,11 @@ lua tests/preview.lua [dashboard|buffers|glasses|crafting|network]   # UI в т�
 
 - Крафты AE2 не проверены в игре: фикстуры реконструированы по `NetworkControl.scala`.
   Если страница пуста или цифры странные — просить вывод `tools/medump.lua`.
+- Слежение за предметами/жидкостями (`core/stock.lua`) не проверено в игре: те же
+  геттеры `NetworkControl.scala` (`getItemInNetwork`, `getFluidsInNetwork`,
+  `getItemsInNetwork`). `getItemsInNetwork` тяжёлый (весь инвентарь сети) — тянется
+  только при открытии пикера и по Refresh, не в цикле. Диагностика — секция ME stock
+  в `tools/medump.lua`.
 - Отмена зависшего задания из очков: `cancel()` в API есть, сознательно не сделано —
   решили ограничиться мониторингом, чтобы случайный клик не убил многочасовой заказ.
 - Chat Box из Computronics как альтернатива вводу с очков (радиус 40 блоков, настраивается).

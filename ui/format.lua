@@ -47,6 +47,14 @@ function format.magnitude(value)
     return parser.metricNumber(math.abs(value or 0)) .. " " .. format.UNIT .. "/t"
 end
 
+-- An ME item or fluid amount, compact for a narrow column: 1234567 -> "1.2M".
+-- Fluids carry a mB unit (millibuckets, AE2's own unit); items are a bare count.
+function format.stock(kind, count)
+    local amount = parser.metricNumber(count or 0)
+    if kind == "fluid" then return amount .. " mB" end
+    return amount
+end
+
 function format.percent(fraction)
     if fraction == nil then return "--" end
     -- Near-full and near-empty both round to a flat 100%/0% and hide the fact

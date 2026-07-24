@@ -1,6 +1,9 @@
 -- Renders the on-screen UI to stdout against a fake GPU.
 --
---   lua tests/preview.lua [dashboard|buffers]
+--   lua tests/preview.lua [dashboard|buffers|glasses|crafting|network|stock|settings]
+--
+-- "stock" renders the dashboard for a physical buffer so its ME item column
+-- shows; "buffers" renders the two-column buffer list + ME item picker.
 --
 -- The panel cannot be exercised inside Minecraft from a test suite, but the
 -- renderer only ever talks to the gpu component through set/fill/getResolution.
@@ -130,7 +133,27 @@ local states = require("core.states")
 graphics.setContext({gpu = gpu, width = WIDTH, height = HEIGHT})
 
 local config = configuration.load()
-config.buffers = {}
+
+-- Config buffers backing the staged views, so the Buffers page and the ME item
+-- picker have something to select and edit. The staged monitor views below carry
+-- matching addresses.
+config.buffers = {
+    {
+        address = "lsc-1", name = "Main LSC", kind = "lsc", enabled = true,
+        stock = {enabled = true, watch = {
+            {kind = "item", name = "gt:ingot.titanium", damage = 0, label = "Titanium Ingot"},
+            {kind = "item", name = "gt:wafer.silicon", damage = 0, label = "Silicon Wafer"},
+            {kind = "fluid", name = "fluid.molten.tin", label = "Molten Tin"},
+        }},
+    },
+    {address = "bb-1", name = "Battery Buffer", kind = "batterybuffer", enabled = true},
+}
+
+-- Turn on both extra glasses cards so the Glasses page previews their full
+-- expanded controls, not just the collapsed rows.
+local previewGlasses = configuration.glassesFor(config, "3a2f1c9e-0000-4000-8000-000000000001")
+previewGlasses.craft.enabled = true
+previewGlasses.stock.enabled = true
 
 -- Hand-built views: this previews the layout, so the numbers are staged rather
 -- than read from a component.
@@ -170,8 +193,32 @@ stage(monitorLib.AGGREGATE_ID, "All buffers",
     9.2233720368548e18, "9223372036854775807", 1.4757395258968e19,
     32768, 1200000, 1328)
 stage("lsc-1", "Main LSC", 4.4e17, "440000000000000000", 1.4757395258968e19,
-    32768, 12000, 1328)
-stage("bb-1", "Battery Buffer", 1234, nil, 5678, 12, 34, 0, states.IDLE)
+    32768, 12000, 1328).address = "lsc-1"
+stage("bb-1", "Battery Buffer", 1234, nil, 5678, 12, 34, 0, states.IDLE).address = "bb-1"
+
+-- A staged ME stock monitor, so the Buffers picker and the dashboard column have
+-- amounts to show without an ME network. The snapshot is keyed the same way the
+-- poll keys it; one watched item is left absent to show the "out of stock" row.
+local stockLib = require("core.stock")
+local stockMonitor = stockLib.new(config)
+stockMonitor.snapshot = {
+    [stockLib.key("item", "gt:ingot.titanium", 0)] = {kind = "item", label = "Titanium Ingot", count = 4096, present = true},
+    [stockLib.key("item", "gt:wafer.silicon", 0)]  = {kind = "item", label = "Silicon Wafer", count = 0, present = false},
+    [stockLib.key("fluid", "fluid.molten.tin")]    = {kind = "fluid", label = "Molten Tin", count = 144000, present = true},
+}
+-- What the picker would have pulled from getItemsInNetwork/getFluidsInNetwork.
+local stockSnapshot = {
+    items = {
+        {kind = "item", name = "gt:ingot.titanium", damage = 0, label = "Titanium Ingot", count = 4096},
+        {kind = "item", name = "gt:plate.steel", damage = 0, label = "Steel Plate", count = 2310},
+        {kind = "item", name = "gt:wafer.silicon", damage = 0, label = "Silicon Wafer", count = 0},
+        {kind = "item", name = "gt:dust.redstone", damage = 0, label = "Redstone", count = 51200},
+    },
+    fluids = {
+        {kind = "fluid", name = "fluid.molten.tin", damage = 0, label = "Molten Tin", count = 144000},
+        {kind = "fluid", name = "fluid.water", damage = 0, label = "Water", count = 16000000},
+    },
+}
 
 -- A staged ME network, for the Crafting page. Same approach as the buffers
 -- above: the jobs are hand-built rather than read from a component, so the
@@ -214,7 +261,18 @@ stageJob({
 })
 
 local page = (...) or "dashboard"
-local application = app.new(monitor, config, nil, nil, craftMonitor)
+local application = app.new(monitor, config, nil, nil, craftMonitor, stockMonitor)
+application.selectedBuffer = "lsc-1"
+application.stockSnapshot = stockSnapshot
+
+-- "stock" previews the dashboard for a physical buffer, so its ME column shows;
+-- the plain "dashboard" stays on the aggregate (which has no column) to keep
+-- exercising the >2^53 exact-string path.
+if page == "stock" then
+    page = "dashboard"
+    config.screen.source = "lsc-1"
+end
+
 application.page = page
 application:draw()
 

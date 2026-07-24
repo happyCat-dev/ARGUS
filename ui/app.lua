@@ -19,6 +19,8 @@ local configuration = require("config")
 local craftLib = require("core.craft")
 local monitorLib = require("core.monitor")
 local sources = require("core.sources")
+local stockLib = require("core.stock")
+local updateLib = require("core.update")
 
 local format = require("ui.format")
 local panel = require("ui.panel")
@@ -27,6 +29,7 @@ local widgets = require("ui.widgets")
 -- For the anchor list: ar.panel owns the HUD layout, so it owns the corners.
 local arPanel = require("ar.panel")
 local arCraft = require("ar.craft")
+local arStock = require("ar.stock")
 
 local app = {}
 app.__index = app
@@ -47,18 +50,20 @@ local function buildLabel()
     return ref and (label .. " @" .. ref) or label
 end
 
--- `hud`, `server` and `craft` are optional: the Glasses page uses hud to report
--- the viewport detected from glasses_on, the Network page uses server to list
--- connected clients, and the Crafting page uses craft to list ME CPUs. None is
--- required for the app to run — a nil craft monitor means crafting is switched
+-- `hud`, `server`, `craft` and `stock` are optional: the Glasses page uses hud
+-- to report the viewport detected from glasses_on, the Network page uses server
+-- to list connected clients, the Crafting page uses craft to list ME CPUs, and
+-- the Buffers page uses stock to pick and show ME item/fluid amounts. None is
+-- required for the app to run — a nil monitor means that feature is switched
 -- off, and the page says so rather than failing.
-function app.new(monitor, config, hud, server, craft)
+function app.new(monitor, config, hud, server, craft, stock)
     return setmetatable({
         monitor = monitor,
         config = config,
         hud = hud,
         server = server,
         craft = craft,
+        stock = stock,
         page = "dashboard",
         running = true,
         dirty = true,
@@ -103,27 +108,92 @@ end
 
 -- Pages ---------------------------------------------------------------------
 
+-- The config buffer entry backing a view, or nil for the aggregate, a virtual
+-- wireless view, or a remote buffer — none of which is a local ME-adjacent
+-- component and so none of which can carry a watchlist.
+function app:bufferEntryFor(view)
+    if not view or not view.address or view.remote then return nil end
+    if view.kind == "wireless" or view.kind == "aggregate" then return nil end
+    for _, entry in ipairs(self.config.buffers) do
+        if entry.address == view.address then return entry end
+    end
+    return nil
+end
+
+-- The watched ME rows for a view, as a right-hand column beside the buffer.
+local STOCK_COL_WIDTH = 26
+
+function app:drawStockColumn(x, row, width, bottom, stockRows, theme)
+    graphics.text(x, row, "ME network", theme.muted, true)
+    row = row + 1
+    for _, item in ipairs(stockRows) do
+        if row > bottom then break end
+        -- Count first and highlighted: it is the field that matters. A count of
+        -- zero (watched but out of stock) is muted so it reads as "gone", not as
+        -- a live figure.
+        local amount = format.stock(item.kind, item.count)
+        graphics.text(x, row, amount, item.present and palette.text or palette.red, true)
+        graphics.text(x + 10, row, text.fit(item.label, width - 10),
+            item.present and theme.text or theme.muted, true)
+        row = row + 1
+    end
+end
+
 function app:drawDashboard(width, rows, theme)
     local view = self.monitor:resolve(self.config.screen.source)
     if not view then
         graphics.text(2, 4, "No buffers configured — open Buffers", theme.muted, true)
         return
     end
+
+    -- A watchlist only belongs to a physical local buffer; the aggregate and the
+    -- virtual wireless view have no ME network of their own to read.
+    local stockRows = {}
+    if self.stock then
+        local entry = self:bufferEntryFor(view)
+        if entry then stockRows = self.stock:rowsFor(entry) end
+    end
+
+    local bodyWidth = width - 3
+    if #stockRows > 0 then bodyWidth = bodyWidth - STOCK_COL_WIDTH - 2 end
+
     panel.header(2, 1, width - 2, view, theme, palette)
     panel.rule(2, 2, width - 2, theme)
-    panel.draw(2, 4, width - 3, rows - 6, view, theme, palette,
+    panel.draw(2, 4, bodyWidth, rows - 6, view, theme, palette,
         self.config.screen.graphWindow or 600)
+
+    if #stockRows > 0 then
+        self:drawStockColumn(2 + bodyWidth + 2, 4, STOCK_COL_WIDTH, rows - 2,
+            stockRows, theme)
+    end
 end
 
+-- The Buffers page is two columns: the buffer list on the left (pick which one
+-- the dashboard shows, rename it, switch it on or off), and the ME item/fluid
+-- picker for the selected buffer on the right. The picker lives here rather than
+-- in its own footer page because the watchlist is per-buffer — it belongs next
+-- to the buffer it decorates.
 function app:drawBuffers(width, rows, theme)
     graphics.text(2, 1, "Buffers", theme.primary, true)
-    graphics.text(10, 1, "· click a row to show it on screen · rename to name it yourself",
+    graphics.text(10, 1, "· click a buffer to show it; pick ME items to watch beside it",
         theme.muted, true)
     panel.rule(2, 2, width - 2, theme)
 
+    -- Split near the middle, but keep the picker wide enough for its list.
+    local split = math.min(58, math.floor(width / 2))
+    self:drawBufferList(2, split - 3, rows, theme)
+    self:drawStockEditor(split, width - split - 1, rows, theme)
+end
+
+function app:drawBufferList(x, width, rows, theme)
     local row = 4
     local views = self.monitor:list()
     local selected = self.config.screen.source
+
+    -- Button columns, measured from the right edge of this column.
+    local onX = x + width - 6
+    local renameX = onX - 10
+    local captionW = renameX - x - 1
 
     local function toggle(entry)
         return function()
@@ -150,6 +220,8 @@ function app:drawBuffers(width, rows, theme)
         end
     end
 
+    local nameW = math.max(8, captionW - 16)
+
     for _, view in ipairs(views) do
         if row > rows - 4 then break end
 
@@ -157,13 +229,13 @@ function app:drawBuffers(width, rows, theme)
         local isSelected = (selected == view.id) or (selected == nil and isAggregate)
 
         -- text.fit, not :sub — a byte-slice can cut a UTF-8 name mid-character.
-        local caption = string.format("%s %10s  %12s",
-            text.fit(view.name or "?", 28),
+        local caption = string.format("%s %6s %8s",
+            text.fit(view.name or "?", nameW),
             format.percent(view.percent),
             format.rate(view.net))
 
         -- The aggregate and the virtual wireless views are not components, so
-        -- there is nothing to enable or disable for them.
+        -- there is nothing to enable, disable, or watch items beside.
         local entry
         if not isAggregate and view.kind ~= "wireless" then
             for _, candidate in ipairs(self.config.buffers) do
@@ -171,14 +243,16 @@ function app:drawBuffers(width, rows, theme)
             end
         end
 
-        widgets.listItem(2, row, width - 24, caption, theme, isSelected, function()
+        widgets.listItem(x, row, captionW, caption, theme, isSelected, function()
             self.config.screen.source = isAggregate and nil or view.id
+            -- Follow the selection into the picker, but only for a real buffer.
+            if entry then self.selectedBuffer = entry.address end
             self.dirty = true
         end, nil, entry and entry.enabled)
 
         if entry then
-            widgets.button(width - 22, row, "rename", theme, rename(entry), nil, false)
-            widgets.button(width - 11, row, " on", theme, toggle(entry), nil, true)
+            widgets.button(renameX, row, "rename", theme, rename(entry), nil, false)
+            widgets.button(onX, row, "on", theme, toggle(entry), nil, true)
         end
         row = row + 1
     end
@@ -188,17 +262,17 @@ function app:drawBuffers(width, rows, theme)
     -- what makes switching one back on possible at all.
     for _, entry in ipairs(self.config.buffers) do
         if entry.enabled == false and row <= rows - 4 then
-            widgets.listItem(2, row, width - 24,
-                text.fit(entry.name or entry.address, 28) .. "   not monitored",
+            widgets.listItem(x, row, captionW,
+                text.fit((entry.name or entry.address) .. "  not monitored", captionW),
                 theme, false, toggle(entry), nil, false)
-            widgets.button(width - 22, row, "rename", theme, rename(entry), nil, false)
-            widgets.button(width - 11, row, "off", theme, toggle(entry), nil, false)
+            widgets.button(renameX, row, "rename", theme, rename(entry), nil, false)
+            widgets.button(onX, row, "off", theme, toggle(entry), nil, false)
             row = row + 1
         end
     end
 
     row = row + 1
-    widgets.button(2, row, "Rescan components", theme, function()
+    widgets.button(x, row, "Rescan components", theme, function()
         local found = sources.discover()
         configuration.syncBuffers(self.config, found)
         self:notify(#found .. " component(s) found")
@@ -206,13 +280,194 @@ function app:drawBuffers(width, rows, theme)
     end, nil, true)
 
     if #self.config.buffers == 0 then
-        graphics.text(2, row + 2, "Nothing detected. The Adapter must touch the multiblock's",
+        graphics.text(x, row + 2, "Nothing detected. The Adapter must", theme.muted, true)
+        graphics.text(x, row + 3, "touch the multiblock CONTROLLER block", theme.muted, true)
+        graphics.text(x, row + 4, "and be wired to this computer.", theme.muted, true)
+        graphics.text(x, row + 5, "tools/sensordump.lua lists everything.", theme.muted, true)
+    end
+end
+
+-- Which config buffer the picker is editing. Kept valid: a buffer can be removed
+-- or renamed while the page is open, so the selection is repaired to the first
+-- real buffer rather than left dangling.
+function app:selectedStockEntry()
+    local buffers = self.config.buffers or {}
+    for _, entry in ipairs(buffers) do
+        if entry.address == self.selectedBuffer then return entry end
+    end
+    -- Fall back to whatever the dashboard is showing, then to the first buffer.
+    local view = self.monitor:resolve(self.config.screen.source)
+    local entry = self:bufferEntryFor(view) or buffers[1]
+    if entry then self.selectedBuffer = entry.address end
+    return entry
+end
+
+-- The full network inventory for the picker is cached in self.stockSnapshot:
+-- getItemsInNetwork is heavy (every stack in the network), so it is pulled once
+-- when the editor opens and only re-pulled on Refresh, never per frame.
+function app:ensureStockSnapshot()
+    if self.stockSnapshot then return end
+    local listing, err = self.stock:networkListing()
+    self.stockSnapshot = listing or {items = {}, fluids = {}, error = err}
+end
+
+local STOCK_MAX = 5
+
+function app:drawStockEditor(x, width, rows, theme)
+    local bottom = rows - 3
+
+    if not self.stock then
+        graphics.text(x, 4, "ME stock watch is unavailable.", theme.muted, true)
+        return
+    end
+
+    local entry = self:selectedStockEntry()
+    if not entry then
+        graphics.text(x, 4, "No buffer selected.", theme.muted, true)
+        return
+    end
+
+    local list = configuration.stockFor(entry)
+    local row = 4
+
+    -- Header: which buffer, and this buffer's own on/off for the column.
+    graphics.text(x, row, "ME items · " .. text.fit(entry.name or entry.address, width - 18),
+        theme.text, true)
+    row = row + 1
+
+    local x2 = x + widgets.button(x, row, list.enabled ~= false and "shown" or "hidden", theme,
+        function() list.enabled = not (list.enabled ~= false) self.dirty = true end,
+        nil, list.enabled ~= false) + 1
+    if self.config.stock and self.config.stock.enabled == false then
+        graphics.text(x2, row, "feature off globally", palette.amber, true)
+    else
+        graphics.text(x2, row, "beside this buffer on the dashboard", theme.muted, true)
+    end
+    row = row + 2
+
+    -- Chosen list -------------------------------------------------------------
+    graphics.text(x, row, string.format("Watching (%d/%d)", #list.watch, STOCK_MAX),
+        theme.muted, true)
+    row = row + 1
+
+    if #list.watch == 0 then
+        graphics.text(x, row, "nothing yet — pick from the network below", theme.muted, true)
+        row = row + 1
+    end
+    for i, w in ipairs(list.watch) do
+        local snap = self.stock.snapshot[stockLib.key(w.kind, w.name, w.damage)]
+        local amount = snap and format.stock(w.kind, snap.count) or "—"
+        graphics.text(x, row, amount, (snap and snap.present) and palette.text or theme.muted, true)
+        graphics.text(x + 10, row, text.fit(w.label or w.name, width - 16), theme.text, true)
+        widgets.button(x + width - 5, row, "x", theme, function()
+            table.remove(list.watch, i)
+            self:notify("Removed — Save to keep")
+            self.dirty = true
+        end, nil, false)
+        row = row + 1
+    end
+    row = row + 1
+
+    panel.rule(x, row, width, theme)
+    row = row + 1
+
+    -- Picker controls ---------------------------------------------------------
+    self:ensureStockSnapshot()
+    local snapshot = self.stockSnapshot
+    local tab = self.stockTab or stockLib.ITEM
+
+    local cx = x
+    cx = cx + widgets.button(cx, row, "Items", theme, function()
+        self.stockTab = stockLib.ITEM self.dirty = true
+    end, nil, tab == stockLib.ITEM) + 1
+    cx = cx + widgets.button(cx, row, "Fluids", theme, function()
+        self.stockTab = stockLib.FLUID self.dirty = true
+    end, nil, tab == stockLib.FLUID) + 1
+    cx = cx + widgets.button(cx, row, "Refresh", theme, function()
+        self.stockSnapshot = nil
+        self:notify("Reloading network…")
+        self.dirty = true
+    end, nil, false) + 1
+    row = row + 1
+
+    local filter = self.stockFilter or ""
+    cx = x + widgets.button(x, row, filter == "" and "filter: (all)"
+        or ("filter: " .. text.fit(filter, 14)), theme, function()
+            local typed = widgets.prompt(2, rows - 2, 30, self.stockFilter or "", theme)
+            if typed ~= nil then self.stockFilter = typed end
+            self.dirty = true
+        end, nil, filter ~= "") + 1
+    if filter ~= "" then
+        widgets.button(cx, row, "clear", theme, function()
+            self.stockFilter = "" self.dirty = true
+        end, nil, false)
+    end
+    row = row + 1
+
+    -- Network list ------------------------------------------------------------
+    if snapshot.error then
+        graphics.text(x, row, "No ME network: " .. text.fit(snapshot.error, width - 14),
+            palette.amber, true)
+        graphics.text(x, row + 1, "Adapter must touch an ME Controller/Interface.",
             theme.muted, true)
-        graphics.text(2, row + 3, "CONTROLLER block and be connected to this computer.",
-            theme.muted, true)
-        graphics.text(2, row + 4, "Run tools/sensordump.lua to see every component.",
+        return
+    end
+
+    local pool = (tab == stockLib.FLUID) and snapshot.fluids or snapshot.items
+    local needle = filter:lower()
+    local matches = {}
+    for _, item in ipairs(pool) do
+        if needle == "" or item.label:lower():find(needle, 1, true) then
+            table.insert(matches, item)
+        end
+    end
+
+    if #pool == 0 then
+        graphics.text(x, row, "network reports no " .. tab .. "s", theme.muted, true)
+        return
+    end
+    if #matches == 0 then
+        graphics.text(x, row, "nothing matches \"" .. text.fit(filter, 16) .. "\"", theme.muted, true)
+        return
+    end
+
+    local shown = 0
+    for _, item in ipairs(matches) do
+        if row > bottom then break end
+        local amount = format.stock(item.kind, item.count)
+        graphics.text(x, row, amount, palette.text, true)
+        graphics.text(x + 10, row, text.fit(item.label, width - 12), theme.text, true)
+        widgets.region(x, row, width, 1, function()
+            self:addWatch(list, item)
+        end)
+        row = row + 1
+        shown = shown + 1
+    end
+    if shown < #matches then
+        graphics.text(x, row, "+" .. (#matches - shown) .. " more — type to filter",
             theme.muted, true)
     end
+end
+
+-- Add one network item/fluid to a buffer's watchlist, capped at STOCK_MAX and
+-- de-duplicated by the same key the poll uses.
+function app:addWatch(list, item)
+    if #list.watch >= STOCK_MAX then
+        self:notify("Watchlist full (max " .. STOCK_MAX .. ")")
+        return
+    end
+    local key = stockLib.key(item.kind, item.name, item.damage)
+    for _, w in ipairs(list.watch) do
+        if stockLib.key(w.kind, w.name, w.damage) == key then
+            self:notify("Already watching " .. (item.label or item.name))
+            return
+        end
+    end
+    table.insert(list.watch, {
+        kind = item.kind, name = item.name, damage = item.damage, label = item.label,
+    })
+    self:notify("Added " .. (item.label or item.name) .. " — Save to keep")
+    self.dirty = true
 end
 
 -- Step to the next entry of a list, wrapping around.
@@ -230,6 +485,8 @@ local INTERVALS = {4, 8, 15, 30}
 -- Rows the crafting card offers. Capped at 8 to match ar/craft.lua, which
 -- clamps there for the same reason: past that the card covers the game.
 local CRAFT_ROWS = {2, 3, 4, 5, 6, 8}
+-- The stock card can never show more than the watchlist cap of 5.
+local STOCK_ROWS = {2, 3, 4, 5}
 
 function app:nextSource(settings)
     local views = self.monitor:list()
@@ -458,6 +715,62 @@ function app:drawGlasses(width, rows, theme)
         row = row + 1
     end
 
+    -- Stock card -------------------------------------------------------------
+    -- A third card, independent again: shows the watched ME item/fluid amounts
+    -- for whichever buffer these glasses display (it follows a cycle). What each
+    -- buffer watches is picked on the Buffers page.
+    local stockCard = settings.stock
+
+    label("Stock card")
+    x = 14
+    x = x + widgets.button(x, row, stockCard.enabled and "on" or "off", theme, function()
+        stockCard.enabled = not stockCard.enabled
+        self.dirty = true
+    end, nil, stockCard.enabled) + 2
+
+    if not stockCard.enabled then
+        graphics.text(x, row, "← shows up to 5 watched ME items beside the buffer",
+            theme.muted, true)
+        row = row + 2
+    else
+        x = x + widgets.button(x, row, stockCard.anchor, theme, function()
+            stockCard.anchor = cycleValue(arStock.ANCHORS, stockCard.anchor)
+            self.dirty = true
+        end, nil, true) + 1
+
+        local function nudgeStock(dx, dy)
+            return function()
+                stockCard.offsetX = (stockCard.offsetX or 0) + dx
+                stockCard.offsetY = (stockCard.offsetY or 0) + dy
+                self.dirty = true
+            end
+        end
+        x = x + widgets.button(x, row, "←", theme, nudgeStock(-NUDGE, 0), nil, true) + 1
+        x = x + widgets.button(x, row, "→", theme, nudgeStock(NUDGE, 0), nil, true) + 1
+        x = x + widgets.button(x, row, "↑", theme, nudgeStock(0, -NUDGE), nil, true) + 1
+        x = x + widgets.button(x, row, "↓", theme, nudgeStock(0, NUDGE), nil, true) + 2
+
+        x = x + widgets.button(x, row, "rows " .. (stockCard.rows or 5), theme, function()
+            stockCard.rows = cycleValue(STOCK_ROWS, stockCard.rows)
+            self.dirty = true
+        end, nil, false) + 2
+
+        graphics.text(x, row, string.format("at %d,%d", stockCard.offsetX or 0,
+            stockCard.offsetY or 0), theme.muted, true)
+        row = row + 1
+
+        if not self.stock then
+            graphics.text(14, row, "ME stock watch is off — the card stays hidden.",
+                palette.amber, true)
+            row = row + 1
+        else
+            graphics.text(14, row, "Pick items per buffer on the Buffers page.",
+                theme.muted, true)
+            row = row + 1
+        end
+        row = row + 1
+    end
+
     -- The category shows up as "OC Glasses"; openGlasses is only the lang key.
     -- Both bindings ship unbound, which is the single most common reason the HUD
     -- looks unresponsive.
@@ -638,6 +951,88 @@ function app:drawNetwork(width, rows, theme)
             self.dirty = true
         end, nil, false)
         row = row + 1
+    end
+end
+
+-- Settings -------------------------------------------------------------------
+--
+-- Graph resolution (moved off the footer, where it crowded the page tabs) and
+-- the in-app updater. The updater only ever reports and hands off to setup.lua —
+-- see core/update.lua for why the check and the install both go through
+-- cdn.jsdelivr.net and why the install pins to a tag.
+
+function app:drawSettings(width, rows, theme)
+    graphics.text(2, 1, "Settings", theme.primary, true)
+    graphics.text(11, 1, "· graph resolution and app updates", theme.muted, true)
+    panel.rule(2, 2, width - 2, theme)
+
+    local row = 4
+    local function label(name) graphics.text(2, row, name, theme.muted, true) end
+
+    -- Graph ------------------------------------------------------------------
+    label("Graph window")
+    local x = 16
+    x = x + widgets.button(x, row, format.window(self.config.screen.graphWindow or 600), theme,
+        function() self:nextGraphWindow() self.dirty = true end, nil, false) + 1
+    x = x + widgets.button(x, row, "type…", theme, function() self:typeGraphWindow(rows) end,
+        nil, false) + 2
+    graphics.text(x, row, "the dashboard chart's span; the sample step follows from it",
+        theme.muted, true)
+    row = row + 2
+
+    -- Updates ----------------------------------------------------------------
+    panel.rule(2, row, width - 2, theme)
+    row = row + 1
+    graphics.text(2, row, "Updates", theme.primary, true)
+    row = row + 1
+
+    label("Installed")
+    graphics.text(16, row, self.build or buildLabel(), theme.text, true)
+    row = row + 1
+
+    label("Auto-check")
+    local upd = self.config.update or {}
+    x = 16 + widgets.button(16, row, upd.checkOnStart and "on boot" or "off", theme, function()
+        self.config.update = self.config.update or {}
+        self.config.update.checkOnStart = not self.config.update.checkOnStart
+        self.dirty = true
+    end, nil, upd.checkOnStart) + 2
+    graphics.text(x, row, "check for a newer release when ARGUS starts", theme.muted, true)
+    row = row + 2
+
+    -- Check + result ---------------------------------------------------------
+    x = 2 + widgets.button(2, row, "Check for updates", theme, function()
+        -- A synchronous wget of a tiny file; a second's pause is fine here.
+        self:notify("Checking cdn.jsdelivr.net…")
+        self.updateInfo = nil
+        local info, err = updateLib.check()
+        self.updateInfo = info or {error = err}
+        self.dirty = true
+    end, nil, true) + 2
+
+    local info = self.updateInfo
+    if not info then
+        graphics.text(x, row, "reads cdn.jsdelivr.net (raw.githubusercontent is blocked from many servers)",
+            theme.muted, true)
+    elseif info.error then
+        graphics.text(x, row, "check failed: " .. tostring(info.error), palette.amber, true)
+    elseif info.available then
+        graphics.text(x, row, string.format("update available: %s  (installed %s)",
+            info.latest, info.current), palette.green, true)
+        row = row + 2
+        widgets.button(2, row, "Update now  →  " .. info.latest, theme, function()
+            -- Just flag it and quit: the download and install run after the app
+            -- exits, with visible output, rather than frozen behind a static
+            -- frame. init.lua picks this up. setup.lua keeps the settings.
+            self.pendingUpdate = info.latest
+            self:notify("Quitting to install " .. info.latest .. "…")
+            self.running = false
+        end, nil, true)
+        row = row + 1
+        graphics.text(2, row, "quits ARGUS and runs the installer from the pinned tag; settings are kept",
+            theme.muted, true)
+    else
+        graphics.text(x, row, "up to date (" .. info.current .. ")", palette.green, true)
     end
 end
 
@@ -832,10 +1227,9 @@ function app:footer(width, rows, theme)
         self.page = "network" self.dirty = true
     end, nil, self.page == "network") + 1
 
-    x = x + widgets.button(x, row, "Graph: " .. format.window(self.config.screen.graphWindow or 600),
-        theme, function() self:nextGraphWindow() self.dirty = true end, nil, false) + 1
-    x = x + widgets.button(x, row, "set", theme, function() self:typeGraphWindow(rows) end,
-        nil, false) + 1
+    x = x + widgets.button(x, row, "Settings", theme, function()
+        self.page = "settings" self.dirty = true
+    end, nil, self.page == "settings") + 1
 
     x = x + widgets.button(x, row, "Save", theme, function() self:save() end, nil, false) + 1
     x = x + widgets.button(x, row, "Quit", theme, function() self.running = false end, nil, false) + 2
@@ -869,6 +1263,8 @@ function app:draw()
         self:drawCrafting(width, rows, theme)
     elseif self.page == "network" then
         self:drawNetwork(width, rows, theme)
+    elseif self.page == "settings" then
+        self:drawSettings(width, rows, theme)
     else
         self:drawDashboard(width, rows, theme)
     end

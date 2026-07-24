@@ -31,6 +31,7 @@ local util = require("core.util")
 
 local arPanel = require("ar.panel")
 local arCraft = require("ar.craft")
+local arStock = require("ar.stock")
 
 local hud = {}
 hud.__index = hud
@@ -48,6 +49,9 @@ function hud.new(config)
         -- energy panel: the two are independent cards with their own placement,
         -- their own rebuild triggers, and either can exist without the other.
         craftPanels = {},
+        -- The ME stock card, likewise independent: its own placement, its own
+        -- rebuild trigger, worn with any mix of the other two.
+        stockPanels = {},
         cleared = {},
         addresses = {},
         addressesAt = nil,
@@ -104,6 +108,17 @@ local function craftSignature(settings, resolution)
     }, "|")
 end
 
+-- The stock card's rebuild trigger. Same shape as the crafting card's: `rows` is
+-- in here because the row objects are built once, but WHICH buffer's items show
+-- is not — that follows the displayed view live, without touching the glasses.
+local function stockSignature(settings, resolution)
+    return table.concat({
+        tostring(settings.enabled), tostring(settings.rows),
+        tostring(settings.anchor), tostring(settings.offsetX), tostring(settings.offsetY),
+        tostring(resolution[1]), tostring(resolution[2]),
+    }, "|")
+end
+
 -- Remove leftovers from a previous run before drawing on a pair of glasses for
 -- the first time. Objects from a crashed process cannot be removed individually
 -- (their handles are gone), so this is the only way to reclaim them. Done once
@@ -130,9 +145,17 @@ function hud:dropCraft(address)
     self.craftPanels[address] = nil
 end
 
+function hud:dropStock(address)
+    local panel = self.stockPanels[address]
+    if not panel then return end
+    pcall(function() panel.instance:remove() end)
+    self.stockPanels[address] = nil
+end
+
 function hud:removeAll()
     for address in pairs(self.panels) do self:drop(address) end
     for address in pairs(self.craftPanels) do self:dropCraft(address) end
+    for address in pairs(self.stockPanels) do self:dropStock(address) end
 end
 
 -- Pick the view for one pair of glasses.
@@ -197,7 +220,45 @@ function hud:updateCraft(address, settings, resolution, craftMonitor)
     if not ok then self:dropCraft(address) end
 end
 
-function hud:update(monitor, craftMonitor)
+-- Build or tear down the ME stock card for one pair of glasses.
+--
+-- `stockMonitor` is optional (the feature can be off, or there is no ME network);
+-- either way the card just does not exist. `view` is whichever buffer this pair
+-- is showing, so the card follows the energy card's source — including through a
+-- cycle — and shows that buffer's watchlist.
+function hud:updateStock(address, settings, resolution, stockMonitor, view)
+    local cardSettings = settings.stock or {}
+    local current = self.stockPanels[address]
+    local wanted = stockSignature(cardSettings, resolution)
+
+    if current and current.signature ~= wanted then
+        self:dropStock(address)
+        current = nil
+    end
+
+    local wantCard = cardSettings.enabled and stockMonitor ~= nil
+    if not wantCard then
+        if current then self:dropStock(address) end
+        return
+    end
+
+    if not current then
+        local ok, proxy = pcall(component.proxy, address)
+        if not (ok and proxy) then return end
+        self:clearOnce(address, proxy)
+        local built, instance =
+            pcall(arStock.new, proxy, cardSettings, self.config.theme, resolution)
+        if not built then return end
+        self.stockPanels[address] = {instance = instance, proxy = proxy, signature = wanted}
+        current = self.stockPanels[address]
+    end
+
+    local rows = stockMonitor:rowsForView(view)
+    local ok = pcall(function() current.instance:update(rows, view) end)
+    if not ok then self:dropStock(address) end
+end
+
+function hud:update(monitor, craftMonitor, stockMonitor)
     local now = computer.uptime()
     local seen = {}
 
@@ -209,13 +270,18 @@ function hud:update(monitor, craftMonitor)
         local wanted = signature(settings, resolution)
 
         -- Independent of settings.enabled below: that switch owns the energy
-        -- card only, so a player can wear the crafting card on its own.
+        -- card only, so a player can wear the crafting or stock card on its own.
         self:updateCraft(address, settings, resolution, craftMonitor)
 
         if current and current.signature ~= wanted then
             self:drop(address)
             current = nil
         end
+
+        -- The buffer this pair is showing, captured so the stock card can follow
+        -- it. Set from the energy panel when one is up (so a cycle carries the
+        -- stock card along); otherwise the pinned source.
+        local displayedView
 
         if not settings.enabled then
             if current then self:drop(address) end
@@ -240,13 +306,18 @@ function hud:update(monitor, craftMonitor)
             end
 
             if current then
-                local view = self:selectView(address, settings, monitor, now)
-                local ok = pcall(function() current.instance:update(view, settings.cycle) end)
+                displayedView = self:selectView(address, settings, monitor, now)
+                local ok = pcall(function() current.instance:update(displayedView, settings.cycle) end)
                 -- Glasses unplugged mid-frame: forget the panel and let the next
                 -- pass rebuild it if they come back.
                 if not ok then self:drop(address) end
             end
         end
+
+        -- With no energy card up there is no cycle state, so fall back to the
+        -- pinned source for the stock card to follow.
+        if displayedView == nil then displayedView = monitor:resolve(settings.source) end
+        self:updateStock(address, settings, resolution, stockMonitor, displayedView)
     end
 
     -- Glasses that vanished from the component list.
@@ -255,6 +326,9 @@ function hud:update(monitor, craftMonitor)
     end
     for address in pairs(self.craftPanels) do
         if not seen[address] then self:dropCraft(address) end
+    end
+    for address in pairs(self.stockPanels) do
+        if not seen[address] then self:dropStock(address) end
     end
 end
 

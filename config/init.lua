@@ -37,6 +37,17 @@ local function defaults()
             pollInterval = 0.4,
         },
 
+        -- ME stock watch. Master switch and poll cadence; WHAT each buffer
+        -- watches lives on the buffer entry itself (see config.stockFor), since
+        -- the list is per-buffer. Off here means the network is never polled and
+        -- no column is drawn, whatever the per-buffer lists say.
+        stock = {
+            enabled = true,
+            -- Same reasoning as craft: one getItemInNetwork per watched item is
+            -- cheap, but an item count does not need sub-second freshness.
+            pollInterval = 2,
+        },
+
         -- ME crafting monitor.
         craft = {
             enabled = true,
@@ -98,6 +109,14 @@ local function defaults()
         -- label's own position. Enable if HUD text lands in the wrong place.
         legacyTextScaling = false,
 
+        -- In-app updater (see core/update.lua). Off by default: a network check
+        -- at every boot delays startup, and most players update on their own
+        -- schedule from the terminal. When on, init.lua checks once at startup
+        -- and the Settings page reports whether a newer release is out.
+        update = {
+            checkOnStart = false,
+        },
+
         theme = {
             background = 0x0B0E14,
             panel      = 0x151A23,
@@ -137,6 +156,47 @@ function config.craftCardDefaults()
         -- with something routine, and the stalled one is the reason to look.
         stalledOnly = false,
     }
+end
+
+-- The ME stock card: a third independent card on the same glasses, showing the
+-- watched item/fluid amounts beside the buffer the glasses is displaying. Its own
+-- placement, like the crafting card, so a pair can wear any mix of the three.
+function config.stockCardDefaults()
+    return {
+        -- Off by default: an empty card in every player's view is worse than one
+        -- switched on when they actually watch items.
+        enabled = false,
+
+        -- bottom-right by default, clear of the energy card (top-left) and the
+        -- crafting card (top-right).
+        anchor = "bottom-right",
+        offsetX = 0,
+        offsetY = 0,
+
+        -- How many rows the card reserves. Capped at the watchlist size (5); a
+        -- lower value shrinks the card for a buffer that watches only a few.
+        rows = 5,
+    }
+end
+
+-- A buffer's own ME watchlist. Stored on the buffer entry rather than globally
+-- because the choice is per-buffer, and the buffers subtree is exactly the one
+-- merge() does not walk (entries are keyed by address, with no defaults to
+-- descend into) — so this is filled in by hand, lazily, the way glassesFor does.
+function config.bufferStockDefaults()
+    return {
+        -- This buffer's column, independent of every other buffer's.
+        enabled = true,
+        -- Up to five {kind, name, damage, label}. Capped in the UI, not here.
+        watch = {},
+    }
+end
+
+function config.stockFor(entry)
+    entry.stock = util.defaults(entry.stock, config.bufferStockDefaults())
+    -- A config written before this feature could carry a non-table here.
+    if type(entry.stock.watch) ~= "table" then entry.stock.watch = {} end
+    return entry.stock
 end
 
 function config.glassesDefaults()
@@ -240,6 +300,7 @@ function config.glassesFor(data, address)
     -- `glasses` subtree entirely, because entries there are keyed by address and
     -- there are no defaults to walk. So this level is merged by hand.
     settings.craft = util.defaults(settings.craft, config.craftCardDefaults())
+    settings.stock = util.defaults(settings.stock, config.stockCardDefaults())
     data.glasses[address] = settings
     return settings
 end

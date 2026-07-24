@@ -1516,6 +1516,177 @@ do
     eq("craft lists nothing to draw", #craftMonitor:list(), 0)
 end
 
+-- stock ------------------------------------------------------------------------
+--
+-- The per-buffer ME item/fluid watch. Same driver and same convert()-hole
+-- hazard as craft, but a different set of getters: getItemInNetwork for a single
+-- watched amount, getFluidsInNetwork for all fluids, getItemsInNetwork for the
+-- picker's whole-network listing. The union-of-watched dedup, the hole-skipping
+-- and the "absent reads as zero" rule are the parts worth pinning down.
+
+local stockLib = require("core.stock")
+
+local function aeStack(name, label, size, damage)
+    return {name = name, label = label, size = size, damage = damage or 0}
+end
+local function aeFluid(name, label, amount)
+    return {name = name, label = label, amount = amount}
+end
+
+-- An ME proxy exposing the stock getters. getItemInNetwork resolves against the
+-- same item table, honouring name+damage, and returns nil for anything absent.
+local function fakeMe(items, fluids)
+    local ctrl = {address = "me-stock", type = "me_interface"}
+    ctrl.getItemsInNetwork = method(function() return items end)
+    ctrl.getFluidsInNetwork = method(function() return fluids end)
+    ctrl.getItemInNetwork = method(function(name, damage)
+        for _, it in pairs(items) do
+            if type(it) == "table" and it.name == name and (it.damage or 0) == (damage or 0) then
+                return it
+            end
+        end
+        return nil
+    end)
+    return ctrl
+end
+
+do
+    local items = {
+        [1] = aeStack("gt:ingot.ti", "Titanium Ingot", 4096),
+        -- A hole at [2], exactly as convert() returning null produces. pairs()
+        -- must see the two stacks either side; ipairs() would stop at the gap.
+        [3] = aeStack("gt:plate.steel", "Steel Plate", 2310),
+        [4] = aeStack("gt:dust.small", "Small Pile", 5),
+    }
+    local fluids = {
+        [1] = aeFluid("fluid.tin", "Molten Tin", 144000),
+        [3] = aeFluid("fluid.water", "Water", 16000000),  -- hole at [2]
+    }
+    fakeComponents["me-stock"] = fakeMe(items, fluids)
+    fakeTypes["me-stock"] = "me_interface"
+
+    local config = {
+        stock = {enabled = true},
+        buffers = {
+            {address = "lsc-a", name = "LSC A", stock = {enabled = true, watch = {
+                {kind = "item", name = "gt:ingot.ti", damage = 0, label = "Titanium Ingot"},
+                {kind = "item", name = "gt:missing", damage = 0, label = "Absent Thing"},
+                {kind = "fluid", name = "fluid.tin", label = "Molten Tin"},
+            }}},
+            {address = "lsc-b", name = "LSC B", stock = {enabled = true, watch = {
+                -- Shares Titanium with LSC A: the union must collapse it to one
+                -- lookup, plus a unique item of its own.
+                {kind = "item", name = "gt:ingot.ti", damage = 0, label = "Titanium Ingot"},
+                {kind = "item", name = "gt:plate.steel", damage = 0, label = "Steel Plate"},
+            }}},
+        },
+    }
+
+    local mon = stockLib.new(config)
+    clock = 100
+    mon:update()
+
+    eq("stock collapses an item watched beside two buffers to one lookup",
+        #mon:watched(), 4)
+
+    -- rowsFor keeps the buffer's own order, and reads live counts.
+    local rows = mon:rowsFor(config.buffers[1])
+    eq("stock draws one row per watched entry", #rows, 3)
+    eq("stock reads a present item's count", rows[1].count, 4096)
+    check("stock marks a present item present", rows[1].present)
+    -- Absent is a reading, not an error: the row stays, at zero.
+    eq("stock shows a missing item as zero", rows[2].count, 0)
+    check("stock marks a missing item not present", not rows[2].present)
+    eq("stock reads a fluid by amount", rows[3].count, 144000)
+    eq("stock tags the fluid row as a fluid", rows[3].kind, "fluid")
+
+    -- Keys ---------------------------------------------------------------------
+    eq("stock keys an item stably", stockLib.key("item", "x", 2), stockLib.key("item", "x", 2))
+    check("stock folds damage into an item's identity",
+        stockLib.key("item", "x", 1) ~= stockLib.key("item", "x", 2))
+    check("stock keeps a fluid distinct from an item of the same name",
+        stockLib.key("fluid", "x") ~= stockLib.key("item", "x", 0))
+
+    -- networkListing: the picker's whole-network view.
+    local listing = mon:networkListing()
+    eq("stock lists every described item, skipping holes", #listing.items, 3)
+    eq("stock sorts the network biggest first", listing.items[1].label, "Titanium Ingot")
+    eq("stock sorts the smallest stack last", listing.items[3].label, "Small Pile")
+    eq("stock lists fluids too, holes skipped", #listing.fluids, 2)
+    eq("stock sorts fluids by amount", listing.fluids[1].label, "Water")
+
+    -- A buffer that turned its own list off drops out of the union entirely.
+    config.buffers[2].stock.enabled = false
+    eq("stock drops a buffer whose list is switched off", #mon:watched(), 3)
+    config.buffers[2].stock.enabled = true
+
+    -- The master switch gates everything.
+    config.stock.enabled = false
+    eq("stock watches nothing when the feature is off", #mon:watched(), 0)
+    eq("stock draws no rows when the feature is off", #mon:rowsFor(config.buffers[1]), 0)
+    config.stock.enabled = true
+
+    -- A controller that answers crafting but not the network getters must be
+    -- skipped, not picked blindly — it sorts first by address, so a naive pick
+    -- would land on it and read nothing.
+    fakeComponents["me-craftonly"] = fakeController({{name = "x", busy = false}})
+    fakeTypes["me-craftonly"] = "me_controller"
+    local mon2 = stockLib.new(config)
+    mon2:update()
+    eq("stock skips a controller without the network getters",
+        mon2:rowsFor(config.buffers[1])[1].count, 4096)
+    fakeComponents["me-craftonly"] = nil
+    fakeTypes["me-craftonly"] = nil
+
+    fakeComponents["me-stock"] = nil
+    fakeTypes["me-stock"] = nil
+end
+
+-- No ME network: an ordinary empty state, not a crash.
+do
+    local config = {stock = {enabled = true}, buffers = {
+        {address = "lsc-a", stock = {enabled = true, watch = {
+            {kind = "item", name = "gt:x", damage = 0, label = "X"},
+        }}},
+    }}
+    local mon = stockLib.new(config)
+    mon:update()
+    check("stock reports why it found no network", mon.error ~= nil)
+    eq("stock shows a watched item as zero with no network",
+        mon:rowsFor(config.buffers[1])[1].count, 0)
+    local listing, err = mon:networkListing()
+    check("stock returns no listing without a network", listing == nil)
+    check("stock explains the missing listing", err ~= nil)
+end
+
+-- update -----------------------------------------------------------------------
+--
+-- The network and shell plumbing (check/apply) needs an Internet Card and the
+-- OpenOS shell, so it is not desktop-testable — but the delivery-critical string
+-- logic IS, and it is exactly the part CLAUDE.md warns about: parse the version
+-- out of a version.lua body, and pin an install to an immutable TAG rather than
+-- a moving ref the CDN caches per file.
+
+local updateLib = require("core.update")
+
+eq("update parses a bare version.lua body",
+    updateLib.parseVersion('return "2.5.0"'), "2.5.0")
+-- The real file leads with a comment block; the parse must skip to the string.
+eq("update parses a version.lua with comments",
+    updateLib.parseVersion('-- bump me\nreturn "2.4.0"\n'), "2.4.0")
+eq("update returns nil for a body with no version string",
+    updateLib.parseVersion("return nothing"), nil)
+eq("update returns nil for a non-string body", updateLib.parseVersion(nil), nil)
+
+-- Pinning: a version becomes the tag setup.lua installs from; a SHA is already
+-- immutable and must be left untouched.
+eq("update tags a bare version", updateLib.tagFor("2.5.0"), "v2.5.0")
+eq("update leaves an already-tagged version alone", updateLib.tagFor("v2.5.0"), "v2.5.0")
+eq("update leaves a commit SHA as a ref", updateLib.tagFor("a1b2c3d"), "a1b2c3d")
+
+-- current() is the running build, straight from version.lua.
+eq("update reports the running version", updateLib.current(), require("version"))
+
 -- AR crafting card -------------------------------------------------------------
 --
 -- The second card on the same glasses. Two things matter beyond layout: the
@@ -1616,6 +1787,105 @@ do
 
     fakeComponents["me-3"] = nil
     fakeTypes["me-3"] = nil
+end
+
+-- AR stock card ----------------------------------------------------------------
+--
+-- The third card on the same glasses. Like the crafting card it must stay
+-- independent (worn alone) and must not leak objects. Its own twist is that it
+-- follows the buffer the glasses are showing — it reads whichever view the
+-- energy card would display and shows that buffer's watchlist.
+
+do
+    local states = require("core.states")
+
+    local scConfig = configuration.defaults()
+    scConfig.buffers = {
+        {address = "lsc-sc", name = "Main LSC", kind = "lsc", enabled = true,
+         stock = {enabled = true, watch = {
+            {kind = "item", name = "gt:ti", damage = 0, label = "Titanium Ingot"},
+            {kind = "fluid", name = "fl:tin", label = "Molten Tin"},
+         }}},
+    }
+
+    -- One physical buffer view, staged directly (buildView decorates the table).
+    local scMonitor = monitorLib.new(scConfig)
+    clock = 12000
+    local view = scMonitor:buildView("lsc-sc", {
+        name = "Main LSC", kind = "lsc", state = states.ONLINE,
+        address = "lsc-sc", stored = 100, capacity = 200,
+    }, clock)
+    view.address = "lsc-sc"
+    scMonitor.views["lsc-sc"] = view
+    table.insert(scMonitor.order, "lsc-sc")
+
+    -- A stock monitor with the amounts already polled; one item out of stock.
+    local scStock = stockLib.new(scConfig)
+    scStock.snapshot = {
+        [stockLib.key("item", "gt:ti", 0)] = {kind = "item", label = "Titanium Ingot", count = 4096, present = true},
+        [stockLib.key("fluid", "fl:tin")] = {kind = "fluid", label = "Molten Tin", count = 0, present = false},
+    }
+
+    fakeComponents["glasses-1"] = fakeGlasses()
+    fakeTypes["glasses-1"] = "glasses"
+
+    local scHud = arHud.new(scConfig)
+    local settings = configuration.glassesFor(scConfig, "glasses-1")
+    settings.enabled = false        -- energy card off, to prove independence
+    settings.source = "lsc-sc"      -- pin the glasses to the buffer
+    settings.stock.enabled = true
+    settings.stock.anchor = "bottom-left"
+    settings.stock.rows = 5
+
+    scHud:update(scMonitor, nil, scStock)
+    check("hud builds the stock card", scHud.stockPanels["glasses-1"] ~= nil)
+    eq("the stock card does not need the energy card", scHud.panels["glasses-1"], nil)
+
+    -- No leak: objects are created once and mutated.
+    local glasses = fakeComponents["glasses-1"]
+    local objectCount = countObjects(glasses)
+    scHud:update(scMonitor, nil, scStock)
+    scHud:update(scMonitor, nil, scStock)
+    eq("the stock card mutates its objects instead of leaking new ones",
+        countObjects(glasses), objectCount)
+
+    -- Content: it shows the watched rows for the buffer the glasses display.
+    -- Labels are padded to a fixed width by text.fit (harmless on a glasses text
+    -- object), so the trailing space is trimmed before comparing.
+    local function trimmed(object) return (object.text or ""):gsub("%s+$", "") end
+    local card = scHud.stockPanels["glasses-1"].instance
+    eq("the stock card names the buffer it follows", trimmed(card.dynamic.buffer), "Main LSC")
+    eq("the stock card shows a present item's count", card.rowObjects[1].count.text, "4.1k")
+    eq("the stock card labels the row", trimmed(card.rowObjects[1].label), "Titanium Ingot")
+    eq("the stock card shows a fluid amount in mB", card.rowObjects[2].count.text, "0 mB")
+
+    -- Follows the source: point the glasses at a buffer with no watchlist and the
+    -- card empties, without a rebuild (source is not part of its signature).
+    settings.source = "ghost"
+    scHud:update(scMonitor, nil, scStock)
+    eq("the stock card empties when the view has no watchlist",
+        card.rowObjects[1].count.text, "")
+    eq("the stock card explains an empty view", card.dynamic.empty.text, "nothing watched here")
+
+    settings.source = "lsc-sc"
+    scHud:update(scMonitor, nil, scStock)
+    eq("the stock card follows the source back", trimmed(card.rowObjects[1].label), "Titanium Ingot")
+
+    -- Off switch and the missing-monitor case both hide the card, no error.
+    settings.stock.enabled = false
+    scHud:update(scMonitor, nil, scStock)
+    eq("hud drops the stock card when disabled", scHud.stockPanels["glasses-1"], nil)
+
+    settings.stock.enabled = true
+    scHud:update(scMonitor, nil, nil)
+    eq("hud draws no stock card without a stock monitor", scHud.stockPanels["glasses-1"], nil)
+
+    scHud:update(scMonitor, nil, scStock)  -- rebuild
+    scHud:removeAll()
+    eq("removeAll clears every stock object from the glasses", countObjects(glasses), 0)
+
+    fakeComponents["glasses-1"] = nil
+    fakeTypes["glasses-1"] = nil
 end
 
 -- Installer manifest -----------------------------------------------------------
