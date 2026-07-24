@@ -1,6 +1,6 @@
 -- ARGUS installer.
 --
---   wget -f https://cdn.jsdelivr.net/gh/happyCat-dev/ARGUS@v2.5.2/setup.lua && setup
+--   wget -f https://cdn.jsdelivr.net/gh/happyCat-dev/ARGUS@v2.5.3/setup.lua && setup
 --
 -- Note the `&&`: without it, a failed wget leaves the PREVIOUS setup.lua in
 -- place and `setup` cheerfully runs that instead, installing whatever ref that
@@ -37,11 +37,11 @@ local shell = require("shell")
 -- Use --branch=<commit-sha> to install an exact revision (also immutable).
 -- Use --branch=main only to test unreleased code.
 local REPO = "happyCat-dev/ARGUS"
-local BRANCH = "v2.5.2"
+local BRANCH = "v2.5.3"
 
 -- What this installer expects to find on disk afterwards. Checked at the end so
 -- a stale mirror is reported instead of passing as a clean install.
-local EXPECTED_VERSION = "2.5.2"
+local EXPECTED_VERSION = "2.5.3"
 
 local INSTALL_DIR = "/home/ARGUS"
 

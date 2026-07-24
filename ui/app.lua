@@ -1018,7 +1018,7 @@ function app:drawSettings(width, rows, theme)
             theme.muted, true)
     elseif info.error then
         graphics.text(x, row, "check failed: " .. tostring(info.error), palette.amber, true)
-    elseif info.available then
+    elseif info.newer then
         graphics.text(x, row, string.format("update available: %s  (installed %s)",
             info.latest, info.current), palette.green, true)
         row = row + 2
