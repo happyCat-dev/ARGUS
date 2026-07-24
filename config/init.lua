@@ -155,6 +155,10 @@ function config.craftCardDefaults()
         -- Show only what needs attention. On a big network most CPUs are busy
         -- with something routine, and the stalled one is the reason to look.
         stalledOnly = false,
+
+        -- Folded to the header strip. Toggled from the card itself (the − / +
+        -- button), kept here so the state survives a rebuild and a restart.
+        collapsed = false,
     }
 end
 
@@ -176,6 +180,9 @@ function config.stockCardDefaults()
         -- How many rows the card reserves. Capped at the watchlist size (5); a
         -- lower value shrinks the card for a buffer that watches only a few.
         rows = 5,
+
+        -- Folded to the header strip. Toggled from the card's − / + button.
+        collapsed = false,
     }
 end
 

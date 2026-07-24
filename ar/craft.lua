@@ -91,8 +91,13 @@ local function itemLabel(item, width)
 end
 
 function panel.new(glasses, settings, theme, resolution)
-    local rows = math.max(1, math.min(8, math.floor(settings.rows or 4)))
-    local cardHeight = height(rows)
+    -- Collapsed the card is just the header strip; the row count (and so the
+    -- objects built below) drops to zero and the height to the header alone.
+    -- Because this changes geometry, the toggle rides the card's rebuild
+    -- signature rather than being flipped live.
+    local collapsed = settings.collapsed and true or false
+    local rows = collapsed and 0 or math.max(1, math.min(8, math.floor(settings.rows or 4)))
+    local cardHeight = collapsed and (HEADER + PADDING) or height(rows)
 
     local x, y = anchorPosition(settings.anchor, resolution, WIDTH, cardHeight)
     x = x + (settings.offsetX or 0)
@@ -107,6 +112,7 @@ function panel.new(glasses, settings, theme, resolution)
         x = x,
         y = y,
         page = 0,
+        collapsed = collapsed,
         static = {},
         dynamic = {},
         rowObjects = {},
@@ -118,9 +124,19 @@ function panel.new(glasses, settings, theme, resolution)
     table.insert(self.static, ar.rectangle(glasses, {x, y}, WIDTH, cardHeight, theme.background, 0.55))
     table.insert(self.static, ar.rectangle(glasses, {x, y}, 2, cardHeight, theme.accent, 0.9))
 
-    -- Header
-    self.dynamic.title = ar.text(glasses, "CRAFTING", {x + 7, y + 3}, theme.accent, 0.7)
-    self.dynamic.summary = ar.text(glasses, "", {x + 62, y + 3}, theme.muted, 0.6)
+    -- Fold toggle, first in the header: "−" folds, "+" unfolds. Kept ASCII so it
+    -- renders in the Minecraft font regardless of glyph coverage.
+    self.dynamic.collapse = ar.text(glasses, collapsed and "+" or "-", {x + 6, y + 3}, theme.accent, 0.8)
+    self.dynamic.title = ar.text(glasses, "CRAFTING", {x + 15, y + 3}, theme.accent, 0.7)
+    self.dynamic.summary = ar.text(glasses, "", {x + 70, y + 3}, theme.muted, 0.6)
+
+    if collapsed then
+        -- The whole strip is the expand button, so a folded card is easy to hit.
+        self:addRegion(x, y, WIDTH, HEADER, "craft:collapse")
+        return self
+    end
+
+    self:addRegion(x + 4, y, 11, 12, "craft:collapse")
 
     -- Paging arrows, for when more CPUs are busy than there are rows. Hit boxes
     -- are deliberately larger than the glyphs: aimed with a free cursor over a
@@ -130,9 +146,9 @@ function panel.new(glasses, settings, theme, resolution)
     self:addRegion(x + WIDTH - 29, y, 12, 12, "craft:prev")
     self:addRegion(x + WIDTH - 17, y, 12, 12, "craft:next")
 
-    -- Clicking the header toggles the stalled-only filter, mirroring how the
-    -- energy card's name toggles cycling: one card, one obvious place to click.
-    self:addRegion(x + 4, y, WIDTH - 36, 12, "craft:filter")
+    -- Clicking the header (between the fold toggle and the arrows) toggles the
+    -- stalled-only filter, mirroring how the energy card's name toggles cycling.
+    self:addRegion(x + 15, y, WIDTH - 47, 12, "craft:filter")
 
     for i = 1, rows do
         local rowY = y + HEADER + (i - 1) * ROW_HEIGHT
@@ -244,6 +260,10 @@ function panel:update(craftMonitor, settings)
         if settings and settings.stalledOnly then caption = caption .. " · filtered" end
     end
     self.dynamic.summary.setText(caption)
+
+    -- Folded: the header still carries the busy/stalled count, which is the whole
+    -- point of a glanceable strip. There are no rows or arrows to touch.
+    if self.collapsed then return end
 
     -- Paging ------------------------------------------------------------------
     -- Clamp before drawing: the list shrinks as jobs finish, and a page index
