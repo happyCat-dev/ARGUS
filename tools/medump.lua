@@ -196,4 +196,31 @@ print("Note: stall detection compares readings over time, so a single run of")
 print("this tool always reports 0s frozen. The app decides after " ..
       craftLib.STALL_SECONDS .. "s without change")
 print("(" .. craftLib.EMPTY_STALL_SECONDS .. "s when nothing is dispatched at all).")
+
+-- ME stock (item/fluid watch) --------------------------------------------------
+--
+-- The item picker and the dashboard column read through getItemsInNetwork /
+-- getFluidsInNetwork / getItemInNetwork. If the Buffers picker shows nothing,
+-- this says whether the driver exposes them at all and what they return, using
+-- the same code path the app does.
+line("=")
+print("ME stock (item/fluid amounts):")
+local stockLib = require("core.stock")
+local listing, stockErr = stockLib.new({}):networkListing()
+if not listing then
+    print("  unavailable — " .. tostring(stockErr))
+    print("  Needs getItemsInNetwork/getFluidsInNetwork on the ME driver")
+    print("  (present in 1.11.20-GTNH); the item picker reads through these.")
+else
+    print(string.format("  items in network : %d", #listing.items))
+    for i = 1, math.min(5, #listing.items) do
+        local it = listing.items[i]
+        print(string.format("    %12s   %s", tostring(it.count), tostring(it.label)))
+    end
+    print(string.format("  fluids in network: %d", #listing.fluids))
+    for i = 1, math.min(5, #listing.fluids) do
+        local fluid = listing.fluids[i]
+        print(string.format("    %12s   %s", tostring(fluid.count) .. " mB", tostring(fluid.label)))
+    end
+end
 line("=")

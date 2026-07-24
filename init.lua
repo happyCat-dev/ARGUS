@@ -49,6 +49,8 @@ local configuration = require("config")
 local craftLib = require("core.craft")
 local monitorLib = require("core.monitor")
 local sources = require("core.sources")
+local stockLib = require("core.stock")
+local updateLib = require("core.update")
 
 local app = require("ui.app")
 local arHud = require("ar")
@@ -110,6 +112,11 @@ local function run()
     local craftMonitor = (config.craft and config.craft.enabled ~= false)
         and craftLib.new(config) or nil
 
+    -- Always built, unlike the craft monitor: the item picker on the Buffers
+    -- page needs to read the network even while the display column is switched
+    -- off, so `stock.enabled` gates polling and drawing, not construction.
+    local stockMonitor = stockLib.new(config)
+
     -- Both roles are constructed regardless of the configured one: each is inert
     -- unless config.network.role names it, and building both means switching
     -- role in the UI takes effect without a restart.
@@ -117,7 +124,18 @@ local function run()
     local server = netServer.new(config, transport)
     local client = netClient.new(config, transport)
 
-    local application = app.new(monitor, config, hud, server, craftMonitor)
+    local application = app.new(monitor, config, hud, server, craftMonitor, stockMonitor)
+
+    -- Opt-in update check at boot. Kept before the loop and behind the flag
+    -- because it is a blocking network call — off by default, it never delays
+    -- startup; on, it costs one small fetch and surfaces a newer release in the
+    -- footer status rather than making the player go looking.
+    if config.update and config.update.checkOnStart then
+        local info = updateLib.check()
+        if info and info.available then
+            application:notify("Update " .. info.latest .. " available — see Settings")
+        end
+    end
 
     if not hasScreen then
         config.screen.enabled = false
@@ -125,6 +143,7 @@ local function run()
 
     local lastPoll = -math.huge
     local lastCraftPoll = -math.huge
+    local lastStockPoll = -math.huge
     local frame = 0
 
     while application.running do
@@ -154,8 +173,17 @@ local function run()
             lastCraftPoll = now
         end
 
+        -- Stock keeps its own slow schedule too: one getItemInNetwork per
+        -- watched item, and an item count changes on the scale of seconds. When
+        -- the feature is off there is nothing to watch, so it is not polled.
+        if config.stock and config.stock.enabled ~= false
+            and (now - lastStockPoll) >= (config.stock.pollInterval or 2) then
+            stockMonitor:update()
+            lastStockPoll = now
+        end
+
         -- Cheap: mutates glasses objects that already exist.
-        hud:update(monitor, craftMonitor)
+        hud:update(monitor, craftMonitor, stockMonitor)
 
         -- A full screen redraw is not cheap, so it runs at half the animation
         -- rate — still smooth, at a fraction of the GPU calls.
@@ -200,6 +228,22 @@ local function run()
 
     hud:removeAll()
     restoreScreen()
+
+    -- The Settings page requests an update by setting this and quitting, so the
+    -- download and install run here — after the screen is handed back, with the
+    -- installer's own output visible — instead of frozen behind a static frame.
+    -- setup.lua owns the rest (settings backup, file list, landed-version check);
+    -- a failed download never runs it.
+    if application.pendingUpdate then
+        io.write("Updating ARGUS to " .. tostring(application.pendingUpdate) .. " …\n")
+        local ok, tagOrErr = updateLib.apply(application.pendingUpdate)
+        if ok then
+            require("shell").execute(updateLib.SETUP_PATH .. " " .. tagOrErr)
+        else
+            io.stderr:write("Update failed: " .. tostring(tagOrErr) .. "\n")
+            io.stderr:write("Install manually: see the README.\n")
+        end
+    end
 end
 
 local ok, err = xpcall(run, debug.traceback)
