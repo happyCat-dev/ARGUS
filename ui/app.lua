@@ -1031,7 +1031,7 @@ function app:drawSettings(width, rows, theme)
             self.running = false
         end, nil, true)
         row = row + 1
-        graphics.text(2, row, "quits ARGUS and runs the installer from the pinned tag; settings are kept",
+        graphics.text(2, row, "installs the pinned tag and reboots into it — settings kept, no prompts",
             theme.muted, true)
     else
         graphics.text(x, row, "up to date (" .. info.current .. ")", palette.green, true)

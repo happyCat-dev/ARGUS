@@ -238,7 +238,11 @@ local function run()
         io.write("Updating ARGUS to " .. tostring(application.pendingUpdate) .. " …\n")
         local ok, tagOrErr = updateLib.apply(application.pendingUpdate)
         if ok then
-            require("shell").execute(updateLib.SETUP_PATH .. " " .. tagOrErr)
+            -- --yes so setup asks nothing, and on success it reboots straight
+            -- into the new version (autostart brings ARGUS back up). The player
+            -- clicks Update once and the machine returns running the update — no
+            -- y/n, no manual cd + init. shell.execute never returns on success.
+            require("shell").execute(updateLib.SETUP_PATH .. " --yes " .. tagOrErr)
         else
             io.stderr:write("Update failed: " .. tostring(tagOrErr) .. "\n")
             io.stderr:write("Install manually: see the README.\n")
