@@ -1709,6 +1709,20 @@ eq("update leaves a commit SHA as a ref", updateLib.tagFor("a1b2c3d"), "a1b2c3d"
 -- current() is the running build, straight from version.lua.
 eq("update reports the running version", updateLib.current(), require("version"))
 
+-- SemVer comparison: the guard that stops the updater ever offering a version
+-- that is not strictly newer. Its absence — a plain "differs?" check against a
+-- stale, CDN-cached @latest — is what once downgraded an install to an OLD tag.
+eq("update sees a newer patch", updateLib.compare("2.5.3", "2.5.2"), 1)
+eq("update sees an older version as older", updateLib.compare("2.4.0", "2.5.2"), -1)
+eq("update sees equal versions as equal", updateLib.compare("2.5.2", "2.5.2"), 0)
+eq("update compares minor before patch", updateLib.compare("2.6.0", "2.5.9"), 1)
+eq("update compares major first", updateLib.compare("3.0.0", "2.9.9"), 1)
+eq("update ignores a leading v", updateLib.compare("v2.5.3", "2.5.2"), 1)
+eq("update treats 2.5 and 2.5.0 as equal", updateLib.compare("2.5", "2.5.0"), 0)
+-- The whole point: a stale @latest older than the running build is NOT an update.
+check("update refuses to call an older latest an update",
+    updateLib.compare("2.4.0", "2.5.2") <= 0)
+
 -- AR crafting card -------------------------------------------------------------
 --
 -- The second card on the same glasses. Two things matter beyond layout: the
@@ -1772,18 +1786,22 @@ do
     -- Keys --------------------------------------------------------------------
     -- Distinct from the energy bindings on purpose: ← → keep switching source,
     -- so a player's existing habits are untouched.
-    cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 102, 0) -- 'f'
+    --
+    -- The character is passed as a ONE-CHAR STRING, which is how OCGlasses's
+    -- Java `char` actually arrives in Lua. Passing the numeric code here instead
+    -- is what hid the bug where every symbol hotkey did nothing in game.
+    cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "f", 0)
     check("F toggles the stalled filter back", not settings.craft.stalledOnly)
 
     check("] pages the crafting card forward",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 93, 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "]", 0))
     eq("paging moved the card", card.page, 1)
     check("[ pages the crafting card back",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 91, 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "[", 0))
     eq("paging moved the card back", card.page, 0)
     -- Nothing to page to, so the card must not pretend it handled the key.
     check("[ at the start is not handled",
-        not cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 91, 0))
+        not cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "[", 0))
 
     -- With no energy card up, the energy keys must not silently mutate a hidden
     -- panel's source.
@@ -1813,13 +1831,13 @@ do
     cardHud:update(monitor, craftMonitor)
     card = cardHud.craftPanels["glasses-1"].instance
 
-    -- The - key folds it too (45 = '-').
+    -- The - key folds it too (sent as the char "-", the real signal form).
     check("the - key folds the crafting card",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 45, 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "-", 0))
     check("the - key set the collapsed flag", settings.craft.collapsed)
     cardHud:update(monitor, craftMonitor)
     check("the - key unfolds it again",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 45, 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "-", 0))
     check("the - key cleared the collapsed flag", not settings.craft.collapsed)
     cardHud:update(monitor, craftMonitor)
     card = cardHud.craftPanels["glasses-1"].instance
@@ -1941,14 +1959,15 @@ do
     scHud:update(scMonitor, nil, scStock)
     card = scHud.stockPanels["glasses-1"].instance
 
-    -- The = key folds it too (61 = '='). This pair of glasses wears only the
-    -- stock card, so it also proves the key arrives with no energy/craft card up.
+    -- The = key folds it too (sent as the char "="). This pair of glasses wears
+    -- only the stock card, so it also proves the key arrives with no energy/craft
+    -- card up.
     check("the = key folds the stock card",
-        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 61, 0))
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", "=", 0))
     check("the = key set the stock collapsed flag", settings.stock.collapsed)
     scHud:update(scMonitor, nil, scStock)
     check("the = key unfolds it again",
-        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 61, 0))
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", "=", 0))
     check("the = key cleared the stock collapsed flag", not settings.stock.collapsed)
     scHud:update(scMonitor, nil, scStock)
     card = scHud.stockPanels["glasses-1"].instance

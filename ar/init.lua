@@ -469,6 +469,22 @@ function hud:onClick(user, x, y, monitor)
     return true
 end
 
+-- OCGlasses sends hud_keyboard's character as a Java `char`, which OpenComputers
+-- marshals into Lua as a ONE-CHARACTER STRING ("["), not the numeric code 91.
+-- Comparing it against a number therefore never matched, so every letter/symbol
+-- hotkey silently did nothing in game while the arrow keys — delivered as the
+-- integer `key` scancode — worked. Normalise to a code, accepting a raw number,
+-- a one-char string, or a numeric string, so both the real signal and the tests
+-- resolve the same way.
+local function keyCode(character)
+    if type(character) == "number" then return character end
+    if type(character) == "string" then
+        if #character == 1 then return string.byte(character) end
+        return tonumber(character) or 0
+    end
+    return tonumber(character) or 0
+end
+
 -- Hotkeys inside the free-cursor overlay.
 --
 -- Energy card:   ← / → switch source, 1-9 pick the Nth, `c` toggles cycling.
@@ -492,7 +508,7 @@ function hud:onKey(user, character, key, monitor)
         or self.stockPanels[address]) then return false end
 
     local settings = configuration.glassesFor(self.config, address)
-    character = tonumber(character) or 0
+    character = keyCode(character)
 
     if character == 91 then -- '['
         return self:applyCraftAction(address, "craft:prev")
