@@ -27,7 +27,7 @@
 
 local update = {}
 
-update.REPO = "sblndn20/ARGUS"
+update.REPO = "happyCat-dev/ARGUS"
 update.PROBE = "/tmp/argus-version"
 update.SETUP_PATH = "/home/setup.lua"
 
