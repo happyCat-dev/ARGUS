@@ -1475,6 +1475,28 @@ do
     fakeTypes["me-1"] = nil
 end
 
+-- Unnamed CPUs are labelled from 1, matching how a player counts them, even
+-- though the driver (and the opaque job id) index from 0.
+do
+    local controller = fakeController({
+        {busy = true, active = {aeItem("gt:x", "X", 1)}},
+        {busy = true, active = {aeItem("gt:y", "Y", 1)}},
+    })
+    fakeComponents["me-num"] = controller
+    fakeTypes["me-num"] = "me_controller"
+
+    local m = craftLib.new({craft = {}})
+    clock = 20000
+    m:update()
+    eq("craft labels the first unnamed CPU as 1, not 0", m:get("me-num#0").cpuName, "CPU 1")
+    eq("craft labels the second unnamed CPU as 2", m:get("me-num#1").cpuName, "CPU 2")
+    -- The id stays 0-based, so a getCpus() script still lines up.
+    check("craft keeps the job id 0-based", m:get("me-num#0") ~= nil)
+
+    fakeComponents["me-num"] = nil
+    fakeTypes["me-num"] = nil
+end
+
 -- The Crafting Monitor requirement.
 --
 -- finalOutput() is read off a TileCraftingMonitorTile inside the CPU cluster, so
