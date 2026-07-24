@@ -778,9 +778,9 @@ function app:drawGlasses(width, rows, theme)
         theme.muted, true)
     graphics.text(2, row + 1, "It is UNBOUND by default. Energy: ← → switch, 1-9 pick, C cycles.",
         theme.muted, true)
-    graphics.text(2, row + 2, "Crafting card: [ ] page the list, F shows stalled jobs only.",
+    graphics.text(2, row + 2, "Crafting card: [ ] page the list, F stalled-only, − folds it.  Stock card: = folds it.",
         theme.muted, true)
-    graphics.text(2, row + 3, "Crafting & stock cards: click the − in the header to fold a card to its title.",
+    graphics.text(2, row + 3, "Or click the − button in a card's header to fold it to its title.",
         theme.muted, true)
     row = row + 5
     graphics.text(2, row, "Changes apply instantly. Press Save to keep them.", theme.muted, true)

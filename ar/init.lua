@@ -424,9 +424,13 @@ function hud:applyCraftAction(address, action)
     return false
 end
 
--- Act on a click that landed on the stock card. Its only control is the fold
--- toggle; the watchlist itself is edited on the monitor's Buffers page.
+-- Act on a click or key that targets the stock card. Its only control is the
+-- fold toggle; the watchlist itself is edited on the monitor's Buffers page.
+--
+-- The card-present guard matters for the key path: without it, pressing the fold
+-- key with no stock card worn would still flip the hidden setting.
 function hud:applyStockAction(address, action)
+    if not self.stockPanels[address] then return false end
     if action == "stock:collapse" then
         local settings = configuration.glassesFor(self.config, address).stock
         settings.collapsed = not settings.collapsed
@@ -468,20 +472,24 @@ end
 -- Hotkeys inside the free-cursor overlay.
 --
 -- Energy card:   ← / → switch source, 1-9 pick the Nth, `c` toggles cycling.
--- Crafting card: [ / ] page the list, `f` shows stalled jobs only.
+-- Crafting card: [ / ] page the list, `f` shows stalled jobs only, `-` folds it.
+-- Stock card:    `=` folds it.
 --
 -- The crafting keys are separate rather than shared through a focus mode: the
 -- energy bindings already exist in players' hands, and a focus rule would change
 -- what ← does depending on invisible state. Distinct keys cost two letters and
--- nothing else.
+-- nothing else. The two fold keys are distinct for the same reason — with both
+-- cards worn, one shared key could not tell which to fold.
 --
 -- LWJGL reports 203/205 for the arrow keys, whose `character` is 0 — so both the
 -- character and the key code are inspected.
 function hud:onKey(user, character, key, monitor)
     local address = self:glassesFor(user)
     if not address then return false end
-    -- Either card being present is enough: the crafting card can be worn alone.
-    if not (self.panels[address] or self.craftPanels[address]) then return false end
+    -- Any of the three cards being present is enough — each can be worn alone,
+    -- so the stock card must count here or its fold key would never arrive.
+    if not (self.panels[address] or self.craftPanels[address]
+        or self.stockPanels[address]) then return false end
 
     local settings = configuration.glassesFor(self.config, address)
     character = tonumber(character) or 0
@@ -492,6 +500,10 @@ function hud:onKey(user, character, key, monitor)
         return self:applyCraftAction(address, "craft:next")
     elseif character == 102 then -- 'f'
         return self:applyCraftAction(address, "craft:filter")
+    elseif character == 45 then -- '-' folds the crafting card
+        return self:applyCraftAction(address, "craft:collapse")
+    elseif character == 61 then -- '=' folds the stock card
+        return self:applyStockAction(address, "stock:collapse")
     end
 
     -- Everything below drives the energy card, so ignore it when only the
