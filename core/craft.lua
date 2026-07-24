@@ -183,8 +183,12 @@ function craft:readCpu(address, index, entry, now)
     local id = address .. "#" .. index
     local busy = entry.busy and true or false
     local name = entry.name
-    -- AE2 leaves a CPU unnamed unless the player names it; index is all we have.
-    if not name or name == "" then name = "CPU " .. index end
+    -- AE2 leaves a CPU unnamed unless the player names it, so fall back to its
+    -- position. Numbered from 1, the way a player counts CPUs in the AE2 GUI:
+    -- `index` is 0-based to match the driver's own CPU index (which stays in the
+    -- opaque `id`), so the visible label adds one. A 0-based label read as
+    -- off-by-one to anyone not comparing against a getCpus() script.
+    if not name or name == "" then name = "CPU " .. (index + 1) end
 
     local job = {
         id = id,

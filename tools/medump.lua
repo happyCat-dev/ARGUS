@@ -116,6 +116,15 @@ for _, candidate in ipairs(candidates) do
                         end
                         print("  methods      : " .. table.concat(present, " "))
 
+                        -- The actual truth VALUES, not just presence. The busy
+                        -- count ARGUS shows is entry.busy (== cluster.isBusy);
+                        -- if it disagrees with what the AE2 GUI counts, the fix
+                        -- is to pick whichever of these matches the real number,
+                        -- so print all three side by side.
+                        print(string.format("  isBusy()     = %s", tostring(craftLib.rawCall(cpu, "isBusy"))))
+                        print(string.format("  isActive()   = %s   (entry.busy = %s)",
+                            tostring(craftLib.rawCall(cpu, "isActive")), tostring(entry.busy)))
+
                         -- finalOutput is the one that fails for a reason worth
                         -- printing verbatim: it needs a Crafting Monitor block
                         -- inside the CPU cluster, and says so itself.
