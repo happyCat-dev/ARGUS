@@ -1,6 +1,6 @@
 -- ARGUS installer.
 --
---   wget -f https://cdn.jsdelivr.net/gh/sblndn20/ARGUS@v2.4.0/setup.lua && setup
+--   wget -f https://cdn.jsdelivr.net/gh/sblndn20/ARGUS@v2.5.0/setup.lua && setup
 --
 -- Note the `&&`: without it, a failed wget leaves the PREVIOUS setup.lua in
 -- place and `setup` cheerfully runs that instead, installing whatever ref that
@@ -37,11 +37,11 @@ local shell = require("shell")
 -- Use --branch=<commit-sha> to install an exact revision (also immutable).
 -- Use --branch=main only to test unreleased code.
 local REPO = "sblndn20/ARGUS"
-local BRANCH = "v2.4.0"
+local BRANCH = "v2.5.0"
 
 -- What this installer expects to find on disk afterwards. Checked at the end so
 -- a stale mirror is reported instead of passing as a clean install.
-local EXPECTED_VERSION = "2.4.0"
+local EXPECTED_VERSION = "2.5.0"
 
 local INSTALL_DIR = "/home/ARGUS"
 
