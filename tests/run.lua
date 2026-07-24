@@ -1787,21 +1787,33 @@ do
     -- Distinct from the energy bindings on purpose: ← → keep switching source,
     -- so a player's existing habits are untouched.
     --
-    -- The character is passed as a ONE-CHAR STRING, which is how OCGlasses's
-    -- Java `char` actually arrives in Lua. Passing the numeric code here instead
-    -- is what hid the bug where every symbol hotkey did nothing in game.
-    cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "f", 0)
+    -- The signal is fed in its REAL shape: the routing key is the LWJGL SCANCODE
+    -- in the last position, and the `character` before it is the junk OCGlasses
+    -- actually sends (a live capture showed "[" as 27, "]" as 29). A test that
+    -- put the ASCII code in `character` is exactly what hid the bug where every
+    -- symbol hotkey did nothing in game.
+    cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 0, 33)   -- 'f' = 33
     check("F toggles the stalled filter back", not settings.craft.stalledOnly)
 
     check("] pages the crafting card forward",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "]", 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 29, 27))  -- ']' = 27
     eq("paging moved the card", card.page, 1)
     check("[ pages the crafting card back",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "[", 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 27, 26))  -- '[' = 26
     eq("paging moved the card back", card.page, 0)
     -- Nothing to page to, so the card must not pretend it handled the key.
     check("[ at the start is not handled",
-        not cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "[", 0))
+        not cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 27, 26))
+
+    -- The real signal leads with the glasses ADDRESS; handleSignal must strip it
+    -- and still route by scancode. This is the exact 5-field shape a live capture
+    -- showed: (address, user, junk-char, scancode).
+    check("] pages even with the leading glasses-address arg",
+        cardHud:handleSignal(monitor, "hud_keyboard",
+            "b6ec6652-c56a-4128-a851-4b10b77d2c18", "Tester", 29, 27))
+    eq("the full-signal form still moved the page", card.page, 1)
+    cardHud:handleSignal(monitor, "hud_keyboard",
+        "b6ec6652-c56a-4128-a851-4b10b77d2c18", "Tester", 27, 26)  -- back to page 0
 
     -- With no energy card up, the energy keys must not silently mutate a hidden
     -- panel's source.
@@ -1831,13 +1843,13 @@ do
     cardHud:update(monitor, craftMonitor)
     card = cardHud.craftPanels["glasses-1"].instance
 
-    -- The - key folds it too (sent as the char "-", the real signal form).
+    -- The - key folds it too (scancode 12; the character is the junk OCGlasses sends).
     check("the - key folds the crafting card",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "-", 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 13, 12))
     check("the - key set the collapsed flag", settings.craft.collapsed)
     cardHud:update(monitor, craftMonitor)
     check("the - key unfolds it again",
-        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", "-", 0))
+        cardHud:handleSignal(monitor, "hud_keyboard", "Tester", 13, 12))
     check("the - key cleared the collapsed flag", not settings.craft.collapsed)
     cardHud:update(monitor, craftMonitor)
     card = cardHud.craftPanels["glasses-1"].instance
@@ -1959,15 +1971,14 @@ do
     scHud:update(scMonitor, nil, scStock)
     card = scHud.stockPanels["glasses-1"].instance
 
-    -- The = key folds it too (sent as the char "="). This pair of glasses wears
-    -- only the stock card, so it also proves the key arrives with no energy/craft
-    -- card up.
+    -- The = key folds it too (scancode 13). This pair of glasses wears only the
+    -- stock card, so it also proves the key arrives with no energy/craft card up.
     check("the = key folds the stock card",
-        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", "=", 0))
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 29, 13))
     check("the = key set the stock collapsed flag", settings.stock.collapsed)
     scHud:update(scMonitor, nil, scStock)
     check("the = key unfolds it again",
-        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", "=", 0))
+        scHud:handleSignal(scMonitor, "hud_keyboard", "Tester", 29, 13))
     check("the = key cleared the stock collapsed flag", not settings.stock.collapsed)
     scHud:update(scMonitor, nil, scStock)
     card = scHud.stockPanels["glasses-1"].instance

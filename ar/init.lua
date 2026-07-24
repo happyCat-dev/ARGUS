@@ -469,36 +469,24 @@ function hud:onClick(user, x, y, monitor)
     return true
 end
 
--- OCGlasses sends hud_keyboard's character as a Java `char`, which OpenComputers
--- marshals into Lua as a ONE-CHARACTER STRING ("["), not the numeric code 91.
--- Comparing it against a number therefore never matched, so every letter/symbol
--- hotkey silently did nothing in game while the arrow keys — delivered as the
--- integer `key` scancode — worked. Normalise to a code, accepting a raw number,
--- a one-char string, or a numeric string, so both the real signal and the tests
--- resolve the same way.
-local function keyCode(character)
-    if type(character) == "number" then return character end
-    if type(character) == "string" then
-        if #character == 1 then return string.byte(character) end
-        return tonumber(character) or 0
-    end
-    return tonumber(character) or 0
-end
-
--- Hotkeys inside the free-cursor overlay.
+-- Hotkeys inside the free-cursor overlay, matched by LWJGL SCANCODE (the `key`
+-- argument) — NOT the typed character.
+--
+-- Why the scancode: OCGlasses delivers hud_keyboard as
+--     (glassesAddress, user, character, key)
+-- and its `character` field is unreliable. A live capture showed "[" arriving as
+-- 27 and "]" as 29 — control codes, not their ASCII 91/93. The `key` scancode is
+-- stable and correct, verified in game: [=26, ]=27, -=12, ==13, ←=203, →=205.
+-- (An earlier build compared `character` numerically, so every symbol hotkey did
+-- nothing; the arrow keys worked only because they alone were keyed off `key`.)
 --
 -- Energy card:   ← / → switch source, 1-9 pick the Nth, `c` toggles cycling.
 -- Crafting card: [ / ] page the list, `f` shows stalled jobs only, `-` folds it.
 -- Stock card:    `=` folds it.
 --
--- The crafting keys are separate rather than shared through a focus mode: the
--- energy bindings already exist in players' hands, and a focus rule would change
--- what ← does depending on invisible state. Distinct keys cost two letters and
--- nothing else. The two fold keys are distinct for the same reason — with both
--- cards worn, one shared key could not tell which to fold.
---
--- LWJGL reports 203/205 for the arrow keys, whose `character` is 0 — so both the
--- character and the key code are inspected.
+-- The crafting/stock keys are separate from the energy ones so existing ← →
+-- habits are untouched, and the two fold keys are distinct because with both
+-- cards worn one shared key could not tell which to fold.
 function hud:onKey(user, character, key, monitor)
     local address = self:glassesFor(user)
     if not address then return false end
@@ -508,31 +496,33 @@ function hud:onKey(user, character, key, monitor)
         or self.stockPanels[address]) then return false end
 
     local settings = configuration.glassesFor(self.config, address)
-    character = keyCode(character)
+    key = tonumber(key) or 0
 
-    if character == 91 then -- '['
+    -- Card keys. applyCraft/StockAction no-op when their card is not worn, so
+    -- these are safe to test before the energy card.
+    if key == 26 then      -- '['
         return self:applyCraftAction(address, "craft:prev")
-    elseif character == 93 then -- ']'
+    elseif key == 27 then  -- ']'
         return self:applyCraftAction(address, "craft:next")
-    elseif character == 102 then -- 'f'
+    elseif key == 33 then  -- 'f'
         return self:applyCraftAction(address, "craft:filter")
-    elseif character == 45 then -- '-' folds the crafting card
+    elseif key == 12 then  -- '-' folds the crafting card
         return self:applyCraftAction(address, "craft:collapse")
-    elseif character == 61 then -- '=' folds the stock card
+    elseif key == 13 then  -- '=' folds the stock card
         return self:applyStockAction(address, "stock:collapse")
     end
 
-    -- Everything below drives the energy card, so ignore it when only the
-    -- crafting card is up rather than silently mutating a hidden panel's source.
+    -- Everything below drives the energy card, so ignore it when only a card
+    -- panel is up rather than silently mutating a hidden panel's source.
     if not self.panels[address] then return false end
 
-    if key == 203 then
+    if key == 203 then                   -- left arrow
         self:step(settings, monitor, -1) return true
-    elseif key == 205 then
+    elseif key == 205 then               -- right arrow
         self:step(settings, monitor, 1) return true
-    elseif character >= 49 and character <= 57 then -- '1'..'9'
-        return self:selectIndex(settings, monitor, character - 48) ~= nil
-    elseif character == 99 then -- 'c'
+    elseif key >= 2 and key <= 10 then   -- '1'..'9' (scancodes 2..10)
+        return self:selectIndex(settings, monitor, key - 1) ~= nil
+    elseif key == 46 then                -- 'c'
         settings.cycle = not settings.cycle
         return true
     end
