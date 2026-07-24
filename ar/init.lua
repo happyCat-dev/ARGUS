@@ -102,7 +102,7 @@ end
 -- applies live without touching the glasses.
 local function craftSignature(settings, resolution)
     return table.concat({
-        tostring(settings.enabled), tostring(settings.rows),
+        tostring(settings.enabled), tostring(settings.rows), tostring(settings.collapsed),
         tostring(settings.anchor), tostring(settings.offsetX), tostring(settings.offsetY),
         tostring(resolution[1]), tostring(resolution[2]),
     }, "|")
@@ -113,7 +113,7 @@ end
 -- is not — that follows the displayed view live, without touching the glasses.
 local function stockSignature(settings, resolution)
     return table.concat({
-        tostring(settings.enabled), tostring(settings.rows),
+        tostring(settings.enabled), tostring(settings.rows), tostring(settings.collapsed),
         tostring(settings.anchor), tostring(settings.offsetX), tostring(settings.offsetY),
         tostring(resolution[1]), tostring(resolution[2]),
     }, "|")
@@ -414,15 +414,32 @@ function hud:applyCraftAction(address, action)
         -- Rows that were scrolled away may not exist under the new filter.
         panel.instance.page = 0
         return true
+    elseif action == "craft:collapse" then
+        local settings = configuration.glassesFor(self.config, address).craft
+        settings.collapsed = not settings.collapsed
+        -- Geometry changed, so the card is rebuilt on the next pass (the
+        -- signature carries `collapsed`); nothing to mutate here.
+        return true
     end
     return false
 end
 
--- Returns true when the click landed on either card.
+-- Act on a click that landed on the stock card. Its only control is the fold
+-- toggle; the watchlist itself is edited on the monitor's Buffers page.
+function hud:applyStockAction(address, action)
+    if action == "stock:collapse" then
+        local settings = configuration.glassesFor(self.config, address).stock
+        settings.collapsed = not settings.collapsed
+        return true
+    end
+    return false
+end
+
+-- Returns true when the click landed on any of the three cards.
 --
--- Both cards are tested because they are separate objects at separate anchors:
--- there is no single panel under the cursor to ask. The crafting card goes
--- first only for determinism if a player overlaps the two.
+-- All are tested because they are separate objects at separate anchors: there is
+-- no single panel under the cursor to ask. Order (crafting, then stock, then
+-- energy) is only for determinism if a player overlaps them.
 function hud:onClick(user, x, y, monitor)
     local address = self:glassesFor(user)
     if not address then return false end
@@ -431,6 +448,12 @@ function hud:onClick(user, x, y, monitor)
     if craftPanel then
         local action = craftPanel.instance:hitTest(x, y)
         if action then return self:applyCraftAction(address, action) end
+    end
+
+    local stockPanel = self.stockPanels[address]
+    if stockPanel then
+        local action = stockPanel.instance:hitTest(x, y)
+        if action then return self:applyStockAction(address, action) end
     end
 
     local panel = self.panels[address]

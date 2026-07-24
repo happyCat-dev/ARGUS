@@ -71,8 +71,11 @@ end
 panel.anchorPosition = anchorPosition
 
 function panel.new(glasses, settings, theme, resolution)
-    local rows = math.max(1, math.min(MAX_ROWS, math.floor(settings.rows or MAX_ROWS)))
-    local cardHeight = height(rows)
+    -- Collapsed the card is just its header strip: zero rows, header height. The
+    -- toggle changes geometry, so it rides the rebuild signature (see ar/init).
+    local collapsed = settings.collapsed and true or false
+    local rows = collapsed and 0 or math.max(1, math.min(MAX_ROWS, math.floor(settings.rows or MAX_ROWS)))
+    local cardHeight = collapsed and (HEADER + PADDING) or height(rows)
 
     local x, y = anchorPosition(settings.anchor, resolution, WIDTH, cardHeight)
     x = x + (settings.offsetX or 0)
@@ -86,9 +89,11 @@ function panel.new(glasses, settings, theme, resolution)
         height = cardHeight,
         x = x,
         y = y,
+        collapsed = collapsed,
         static = {},
         dynamic = {},
         rowObjects = {},
+        regions = {},
     }, panel)
 
     -- Chrome. A green stripe sets this card apart from the energy (primary) and
@@ -96,9 +101,19 @@ function panel.new(glasses, settings, theme, resolution)
     table.insert(self.static, ar.rectangle(glasses, {x, y}, WIDTH, cardHeight, theme.background, 0.55))
     table.insert(self.static, ar.rectangle(glasses, {x, y}, 2, cardHeight, palette.green, 0.9))
 
-    -- Header: the card name and the buffer it is showing.
-    self.dynamic.title = ar.text(glasses, "ME STOCK", {x + 7, y + 3}, palette.green, 0.7)
-    self.dynamic.buffer = ar.text(glasses, "", {x + 52, y + 3}, theme.muted, 0.6)
+    -- Fold toggle, then the card name and the buffer it is showing. ASCII "−"/"+"
+    -- so the glyph renders in the Minecraft font regardless of coverage.
+    self.dynamic.collapse = ar.text(glasses, collapsed and "+" or "-", {x + 6, y + 3}, palette.green, 0.8)
+    self.dynamic.title = ar.text(glasses, "ME STOCK", {x + 15, y + 3}, palette.green, 0.7)
+    self.dynamic.buffer = ar.text(glasses, "", {x + 60, y + 3}, theme.muted, 0.6)
+
+    if collapsed then
+        -- The whole strip is the expand button, so a folded card is easy to hit.
+        self:addRegion(x, y, WIDTH, HEADER, "stock:collapse")
+        return self
+    end
+
+    self:addRegion(x + 4, y, 11, 12, "stock:collapse")
 
     -- The count column is left of the label so the numbers line up down the card;
     -- item names are ragged and would push the counts around otherwise.
@@ -117,6 +132,22 @@ function panel.new(glasses, settings, theme, resolution)
     return self
 end
 
+function panel:addRegion(x, y, width, rowHeight, action)
+    table.insert(self.regions, {x = x, y = y, width = width, height = rowHeight, action = action})
+end
+
+-- Returns the action under a hud_click, or nil when the click missed the card.
+function panel:hitTest(x, y)
+    for i = 1, #self.regions do
+        local region = self.regions[i]
+        if x >= region.x and x < region.x + region.width
+            and y >= region.y and y < region.y + region.height then
+            return region.action
+        end
+    end
+    return nil
+end
+
 local function clearRow(row)
     row.count.setText("")
     row.label.setText("")
@@ -130,6 +161,9 @@ function panel:update(rows, view)
     rows = rows or {}
 
     self.dynamic.buffer.setText(view and text.fit(view.name or "?", 18) or "")
+
+    -- Folded: the header names the buffer and that is all there is room for.
+    if self.collapsed then return end
 
     if #rows == 0 then
         for i = 1, self.rows do clearRow(self.rowObjects[i]) end
@@ -166,7 +200,7 @@ function panel:remove()
     end
     ar.remove(self.glasses, dynamic)
 
-    self.static, self.dynamic, self.rowObjects = {}, {}, {}
+    self.static, self.dynamic, self.rowObjects, self.regions = {}, {}, {}, {}
 end
 
 return panel

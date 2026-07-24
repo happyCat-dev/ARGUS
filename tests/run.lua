@@ -1772,6 +1772,24 @@ do
     cardHud:update(monitor, craftMonitor)
     eq("the card clamps a page that ran off the end", card.page, 0)
 
+    -- Fold toggle. The − in the header collapses the card to its strip, and the
+    -- change rides the rebuild (it is geometry), so the panel object is replaced.
+    eq("the header − maps to collapse", card:hitTest(card.x + 8, card.y + 5), "craft:collapse")
+    check("clicking − folds the crafting card",
+        cardHud:handleSignal(monitor, "hud_click", "Tester", card.x + 8, card.y + 5, 0))
+    check("the fold is saved to settings", settings.craft.collapsed)
+    cardHud:update(monitor, craftMonitor)
+    local folded = cardHud.craftPanels["glasses-1"].instance
+    check("a folded card reports itself collapsed", folded.collapsed)
+    check("a folded card is shorter than the full one", folded.height < card.height)
+    -- The whole folded strip is the expand button.
+    eq("clicking a folded card expands it",
+        folded:hitTest(folded.x + 40, folded.y + 5), "craft:collapse")
+    cardHud:handleSignal(monitor, "hud_click", "Tester", folded.x + 40, folded.y + 5, 0)
+    check("expanding clears the collapsed flag", not settings.craft.collapsed)
+    cardHud:update(monitor, craftMonitor)
+    card = cardHud.craftPanels["glasses-1"].instance
+
     settings.craft.enabled = false
     cardHud:update(monitor, craftMonitor)
     eq("hud drops the crafting card when disabled", cardHud.craftPanels["glasses-1"], nil)
@@ -1870,6 +1888,23 @@ do
     settings.source = "lsc-sc"
     scHud:update(scMonitor, nil, scStock)
     eq("the stock card follows the source back", trimmed(card.rowObjects[1].label), "Titanium Ingot")
+
+    -- Fold toggle. The stock card gained its own hit region for this; clicking the
+    -- − folds it to the header, and clicking the folded strip expands it again.
+    eq("the stock header − maps to collapse", card:hitTest(card.x + 8, card.y + 5), "stock:collapse")
+    check("clicking − folds the stock card",
+        scHud:handleSignal(scMonitor, "hud_click", "Tester", card.x + 8, card.y + 5, 0))
+    check("the fold is saved to settings", settings.stock.collapsed)
+    scHud:update(scMonitor, nil, scStock)
+    local foldedStock = scHud.stockPanels["glasses-1"].instance
+    check("a folded stock card reports itself collapsed", foldedStock.collapsed)
+    check("a folded stock card is shorter than the full one", foldedStock.height < card.height)
+    eq("clicking a folded stock card expands it",
+        foldedStock:hitTest(foldedStock.x + 40, foldedStock.y + 5), "stock:collapse")
+    scHud:handleSignal(scMonitor, "hud_click", "Tester", foldedStock.x + 40, foldedStock.y + 5, 0)
+    check("expanding clears the stock collapsed flag", not settings.stock.collapsed)
+    scHud:update(scMonitor, nil, scStock)
+    card = scHud.stockPanels["glasses-1"].instance
 
     -- Off switch and the missing-monitor case both hide the card, no error.
     settings.stock.enabled = false
