@@ -1733,6 +1733,7 @@ do
 
     -- Hit boxes ---------------------------------------------------------------
     local card = cardHud.craftPanels["glasses-1"].instance
+    eq("the crafting card hints its fold key on itself", card.dynamic.collapse.text, "-")
     eq("the header toggles the stalled filter", card:hitTest(card.x + 20, card.y + 5),
         "craft:filter")
     eq("‹ maps to a page back", card:hitTest(card.x + card.width - 24, card.y + 5),
@@ -1883,6 +1884,7 @@ do
     -- object), so the trailing space is trimmed before comparing.
     local function trimmed(object) return (object.text or ""):gsub("%s+$", "") end
     local card = scHud.stockPanels["glasses-1"].instance
+    eq("the stock card hints its fold key on itself", card.dynamic.collapse.text, "=")
     eq("the stock card names the buffer it follows", trimmed(card.dynamic.buffer), "Main LSC")
     eq("the stock card shows a present item's count", card.rowObjects[1].count.text, "4.1k")
     eq("the stock card labels the row", trimmed(card.rowObjects[1].label), "Titanium Ingot")

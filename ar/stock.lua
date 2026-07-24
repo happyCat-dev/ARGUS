@@ -101,9 +101,10 @@ function panel.new(glasses, settings, theme, resolution)
     table.insert(self.static, ar.rectangle(glasses, {x, y}, WIDTH, cardHeight, theme.background, 0.55))
     table.insert(self.static, ar.rectangle(glasses, {x, y}, 2, cardHeight, palette.green, 0.9))
 
-    -- Fold toggle, then the card name and the buffer it is showing. ASCII "−"/"+"
-    -- so the glyph renders in the Minecraft font regardless of coverage.
-    self.dynamic.collapse = ar.text(glasses, collapsed and "+" or "-", {x + 6, y + 3}, palette.green, 0.8)
+    -- Fold toggle, then the card name and the buffer it is showing. The glyph is
+    -- the key that folds this card ("="), so it doubles as the hotkey hint —
+    -- distinct from the crafting card's "-", and shown right on the card.
+    self.dynamic.collapse = ar.text(glasses, "=", {x + 6, y + 3}, palette.green, 0.8)
     self.dynamic.title = ar.text(glasses, "ME STOCK", {x + 15, y + 3}, palette.green, 0.7)
     self.dynamic.buffer = ar.text(glasses, "", {x + 60, y + 3}, theme.muted, 0.6)
 
