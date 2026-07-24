@@ -707,6 +707,10 @@ function app:drawGlasses(width, rows, theme)
             craftCard.offsetY or 0), theme.muted, true)
         row = row + 1
 
+        graphics.text(14, row, "In free cursor: [ ] page · F stalled-only · - fold  (or click the - on the card).",
+            theme.muted, true)
+        row = row + 1
+
         if not self.craft then
             graphics.text(14, row, "Crafting monitoring is off in the config — the card stays hidden.",
                 palette.amber, true)
@@ -759,13 +763,13 @@ function app:drawGlasses(width, rows, theme)
             stockCard.offsetY or 0), theme.muted, true)
         row = row + 1
 
+        graphics.text(14, row, "In free cursor: = fold  (or click the = on the card). Pick items on the Buffers page.",
+            theme.muted, true)
+        row = row + 1
+
         if not self.stock then
             graphics.text(14, row, "ME stock watch is off — the card stays hidden.",
                 palette.amber, true)
-            row = row + 1
-        else
-            graphics.text(14, row, "Pick items per buffer on the Buffers page.",
-                theme.muted, true)
             row = row + 1
         end
         row = row + 1
@@ -776,13 +780,9 @@ function app:drawGlasses(width, rows, theme)
     -- looks unresponsive.
     graphics.text(2, row, "In-game: Controls → \"OC Glasses\" → bind \"Free Cursor (Toggle)\".",
         theme.muted, true)
-    graphics.text(2, row + 1, "It is UNBOUND by default. Energy: ← → switch, 1-9 pick, C cycles.",
+    graphics.text(2, row + 1, "UNBOUND by default — that is why the HUD can look dead. Energy card: ← → switch, 1-9 pick, C cycles.",
         theme.muted, true)
-    graphics.text(2, row + 2, "Crafting card: [ ] page the list, F stalled-only, − folds it.  Stock card: = folds it.",
-        theme.muted, true)
-    graphics.text(2, row + 3, "Or click the − button in a card's header to fold it to its title.",
-        theme.muted, true)
-    row = row + 5
+    row = row + 3
     graphics.text(2, row, "Changes apply instantly. Press Save to keep them.", theme.muted, true)
 end
 
