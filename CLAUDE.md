@@ -14,7 +14,7 @@
 Название планируется расширять функционалом за пределы энергии — отсюда ARGUS
 («стоглазый страж»), а не прежнее EMON (Energy MONitor).
 
-- Репозиторий: `github.com/sblndn20/ARGUS` (переименован из `monitoring-app`)
+- Репозиторий: `github.com/happyCat-dev/ARGUS` (бывш. `sblndn20/ARGUS`, ещё раньше `monitoring-app`)
 - Установка: `/home/ARGUS`, автозапуск через `/home/.shrc`
 - Коммиты **только от имени владельца**, без `Co-Authored-By`
 
