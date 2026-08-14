@@ -1,7 +1,7 @@
 -- In-app updater: check jsDelivr for a newer release, hand off to setup.lua.
 --
 -- Everything here stands on the same delivery facts as setup.lua (and the
--- "Доставка файлов" section of DETAILS.md):
+-- "Delivering files into the game" section of DETAILS.md):
 --
 --   * raw.githubusercontent.com is not reachable from many OpenComputers
 --     servers — its TLS handshake is dropped — so the check uses cdn.jsdelivr.net

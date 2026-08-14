@@ -1,33 +1,37 @@
-# Происхождение и лицензия
+# Provenance and license
 
-ARGUS — производная работа от **[NIDAS](https://github.com/S4mpsa/NIDAS)** (Networked
-Information Display & Automation Software), автор S4mpsa и контрибьюторы.
+**English** · [Русский](NOTICE.ru.md)
 
-NIDAS распространяется под **GNU General Public License v3.0**. GPL-3.0 — копилефт-лицензия,
-поэтому ARGUS как производная работа обязан распространяться на тех же условиях. Полный текст
-лицензии — в [LICENSE.md](LICENSE.md).
+ARGUS is a derivative work of **[NIDAS](https://github.com/S4mpsa/NIDAS)** (Networked
+Information Display & Automation Software), by S4mpsa and contributors.
 
-## Что взято из NIDAS
+NIDAS is distributed under the **GNU General Public License v3.0**. GPL-3.0 is a copyleft
+license, so ARGUS as a derivative work must be distributed under the same terms. The full
+license text is in [LICENSE.md](LICENSE.md).
 
-Заимствованы идеи и код графического слоя, остальное написано заново:
+## What was taken from NIDAS
 
-| Файл ARGUS | Происхождение |
+Ideas and code from the graphics layer were reused; everything else was written from scratch:
+
+| ARGUS file | Origin |
 |---|---|
-| `lib/graphics/ar.lua` | На основе `lib/graphics/ar.lua` из NIDAS. Убрана неявная глобальная `legacyScaling`, снята зависимость от палитры, конвертация цвета вынесена в `lib/utils/screen.lua`, удалены неиспользуемые примитивы. |
-| `lib/graphics/graphics.lua` | На основе `lib/graphics/graphics.lua` из NIDAS (рендеринг полублочными символами). Переписан: исправлена обработка нечётных границ прямоугольника; двойная буферизация сделана опциональной, поэтому на GPU второго уровня приложение работает (с мерцанием), а не отказывается запускаться. |
-| `lib/graphics/colors.lua` | Идея двунаправленной таблицы цветов из NIDAS; палитра своя. Исправлена мутация таблицы во время обхода `pairs()`. |
-| `lib/utils/parser.lua` | На основе `lib/utils/parser.lua` из NIDAS. Исправлены: потеря знака в `getInteger`, `nan` при нуле в `splitNumber`, пропуск диапазона 1000–1000.9 в `metricNumber`. Добавлено форматирование из точной десятичной строки. |
-| `lib/utils/screen.lua` | На основе `lib/utils/screen.lua` из NIDAS. Побитовые операции заменены арифметикой (совместимость с Lua 5.2), добавлен `blend`. |
-| `lib/utils/time.lua` | Функция `time.format` из NIDAS; NIDAS-специфичный хак часов реального времени удалён. |
-| `.shrc`, подход к автозапуску | Схема автозапуска NIDAS через `/home/.shrc`. |
+| `lib/graphics/ar.lua` | Based on `lib/graphics/ar.lua` from NIDAS. Removed the implicit global `legacyScaling`, dropped the palette dependency, moved color conversion into `lib/utils/screen.lua`, removed unused primitives. |
+| `lib/graphics/graphics.lua` | Based on `lib/graphics/graphics.lua` from NIDAS (half-block rendering). Rewritten: fixed odd-rectangle-boundary handling; made double buffering optional, so on a tier-2 GPU the app runs (with flicker) instead of refusing to start. |
+| `lib/graphics/colors.lua` | The idea of a bidirectional color table is from NIDAS; the palette is our own. Fixed table mutation during a `pairs()` traversal. |
+| `lib/utils/parser.lua` | Based on `lib/utils/parser.lua` from NIDAS. Fixed: sign loss in `getInteger`, `nan` at zero in `splitNumber`, the skipped 1000–1000.9 range in `metricNumber`. Added formatting from an exact decimal string. |
+| `lib/utils/screen.lua` | Based on `lib/utils/screen.lua` from NIDAS. Bitwise operations replaced with arithmetic (Lua 5.2 compatibility), added `blend`. |
+| `lib/utils/time.lua` | The `time.format` function from NIDAS; the NIDAS-specific real-time-clock hack was removed. |
+| `.shrc`, autostart approach | The NIDAS autostart scheme via `/home/.shrc`. |
 
-Логика чтения LSC в `core/sources/lsc.lua` вдохновлена `server/usecases/get-lsc-status.lua`
-из NIDAS, но переписана полностью: NIDAS парсит строки сенсора по захардкоженным индексам,
-ARGUS сопоставляет по лейблам. См. раздел «Точность и внутренности» в [README.ru.md](README.ru.md).
+The LSC-reading logic in `core/sources/lsc.lua` was inspired by
+`server/usecases/get-lsc-status.lua` from NIDAS but rewritten entirely: NIDAS parses the
+sensor strings by hardcoded indices, ARGUS matches by label. See the "Accuracy and internals"
+section in [README.md](README.md).
 
-## Что из NIDAS удалено
+## What was removed from NIDAS
 
-Мониторинг мультиблоков, обслуживание/maintenance-оверлей, автоматические инфузии (Thaumcraft),
-дисплеи флюидов, панель инструментов и часы, уведомления, робот-локатор, поддержка планшета,
-микроконтроллеры, автосток, обработка руды, taskboard, сетевой протокол «главный/локальный сервер»
-через модемы, подмена `/lib/core/boot.lua` и `/etc/profile.lua`.
+Multiblock monitoring, the maintenance overlay, automatic infusions (Thaumcraft), fluid
+displays, the toolbar and clock, notifications, the robot locator, tablet support,
+microcontrollers, auto-stocking, ore processing, the taskboard, the "master/local server"
+network protocol over modems, and the replacement of `/lib/core/boot.lua` and
+`/etc/profile.lua`.

@@ -1,374 +1,395 @@
-# История изменений
+# Changelog
 
-Версии до 2.4.0 выпущены 2026-07-16; 2.5.0 — 2026-07-24; 2.5.1 — 2026-07-25;
-2.5.2–2.5.5 — 2026-07-25. Ставить только с тега — см. [DETAILS.ru.md](DETAILS.ru.md).
+**English** · [Русский](CHANGELOG.ru.md)
 
----
-
-## 2.5.5 — обновление из Settings без лишних нажатий
-
-Раньше «Update now» выходил в установщик, который спрашивал `Y/n` про автозапуск и
-в конце просил вручную `cd /home/ARGUS && init`. Теперь обновление бесшовное:
-
-- Установщик **не переспрашивает про автозапуск**, если он уже настроен (или передан
-  `--yes`) — выбор запоминается. Спрашивает только на действительно чистой первой установке.
-- Автообновление зовёт `setup --yes`, и по успешному завершению установщик **сам
-  перезагружает компьютер** — автозапуск поднимает уже новую версию. Ни `y`, ни ручного
-  `cd`+`init`. Перезагрузка (а не повторный `init`) гарантирует, что в общем Lua-стейте не
-  останется старого модуля. Битая загрузка не перезагружает (при ошибке установщик выходит
-  раньше).
+Versions before 2.4.0 were released 2026-07-16; 2.5.0 — 2026-07-24; 2.5.1 — 2026-07-25;
+2.5.2–2.5.5 — 2026-07-25. Install only from a tag — see [DETAILS.md](DETAILS.md).
 
 ---
 
-## 2.5.4 — хоткеи очков на скан-кодах (реальный фикс)
+## 2.5.5 — updating from Settings without extra keystrokes
 
-В 2.5.3 я чинил символьные хоткеи не с той стороны. Живой дамп сигнала показал правду:
-`hud_keyboard` несёт `char` **числом**, но это **не** ASCII (`[`→27, `]`→29 — управляющие
-коды), а вот **скан-код `key` верен**: `[`=26, `]`=27, `-`=12, `=`=13, `f`=33, `c`=46,
-`1`..`9`=2..10, стрелки 203/205. Теперь все клавиши очков вязаны на скан-код `key`, а
-ненадёжный `char` игнорируется. Заработали `[ ] F - =` и `1-9`/`C`. Фикстуры тестов шлют
-реальную форму сигнала (скан-код + мусорный char + ведущий адрес очков), чтобы баг не
-проскочил снова.
+Previously "Update now" dropped into the installer, which asked `Y/n` about autostart and
+at the end told you to run `cd /home/ARGUS && init` by hand. Now the update is seamless:
 
----
-
-## 2.5.3 — автообновление больше не откатывает, символьные хоткеи работают
-
-Два важных фикса.
-
-- **Автообновление могло поставить версию НИЖЕ текущей.** jsDelivr кеширует
-  `@latest` на часы, и апдейтер считал «отличается ⇒ можно обновить» — без сравнения
-  версий, поэтому предлагал и ставил старый тег. Теперь последняя версия берётся из
-  data-API jsDelivr (список отсортирован, кеш свежее), и версии сравниваются по
-  SemVer: «Update now» появляется, **только если версия строго новее**. Откат
-  исключён.
-- **Символьные хоткеи очков не работали в игре** (`[ ] F - =`, а также `1-9`/`C`).
-  OCGlasses шлёт символ клавиши как Java-`char`, а OpenComputers отдаёт его в Lua
-  **строкой из одного символа** (`"["`), не числом `91` — сравнение с числом никогда
-  не совпадало. Работали только стрелки (они идут целым скан-кодом). Теперь символ
-  распознаётся и строкой, и числом. Фикстуры тестов переведены на реальную строковую
-  форму, чтобы баг больше не проходил мимо.
+- The installer **does not re-ask about autostart** if it is already set up (or `--yes`
+  is passed) — the choice is remembered. It only asks on a genuinely clean first install.
+- Auto-update calls `setup --yes`, and on successful completion the installer **reboots the
+  computer itself** — autostart brings up the new version. No `y`, no manual
+  `cd`+`init`. A reboot (rather than another `init`) guarantees that no stale module is
+  left in the shared Lua state. A broken load does not reboot (on error the installer exits
+  earlier).
 
 ---
 
-## 2.5.2 — нумерация CPU с 1 и диагностика занятости
+## 2.5.4 — glasses hotkeys on scan codes (the real fix)
 
-- **Безымянные CPU нумеруются с 1**, как их считает игрок в GUI AE2 (было с 0 —
-  «5-й и 6-й» показывались как «4 и 5»). Внутренний id остаётся 0-based, чтобы
-  сходиться со скриптом на `getCpus()`.
-- **`tools/medump.lua` печатает живые `isBusy()` и `isActive()`** по каждому CPU
-  рядом с `entry.busy`. Это для разбора известного расхождения: наш счётчик
-  «занято» — это `entry.busy` (== `CraftingCPUCluster.isBusy`), и на части сборок
-  он недосчитывает CPU, у которых есть задание, но которые не толкают предмет
-  прямо сейчас. Дамп покажет, какой из сигналов совпадает с реальным числом, —
-  по нему счётчик поправится в следующем патче (а вместе с ним заработает и
-  листание карточки: сейчас занятых мало, они влезают на одну страницу).
+In 2.5.3 I was fixing the character hotkeys from the wrong side. A live signal dump revealed
+the truth: `hud_keyboard` carries `char` as a **number**, but it is **not** ASCII (`[`→27,
+`]`→29 — control codes), whereas the **scan code `key` is correct**: `[`=26, `]`=27, `-`=12,
+`=`=13, `f`=33, `c`=46, `1`..`9`=2..10, arrows 203/205. Now all glasses keys are bound to the
+scan code `key`, and the unreliable `char` is ignored. `[ ] F - =` and `1-9`/`C` now work.
+The test fixtures send the real signal shape (scan code + garbage char + leading glasses
+address) so the bug cannot slip through again.
 
 ---
 
-## 2.5.1 — сворачивание AR-карточек
+## 2.5.3 — auto-update no longer rolls back, character hotkeys work
 
-Мелкое улучшение поверх 2.5.0: карточки крафтов и ME-стока в очках теперь можно
-свернуть до полоски-заголовка, чтобы не занимали обзор.
+Two important fixes.
 
-- **Кнопка сворачивания в шапке** каждой карточки. Свёрнутая карточка показывает
-  только заголовок (у крафтов — счётчик `занято/всего`, у стока — имя буфера);
-  клик по полоске разворачивает обратно. Состояние сохраняется per-glasses и
-  переживает перезапуск.
-- **Хоткеи** в оверлее Free Cursor: `-` сворачивает карточку крафтов, `=` — стока.
-  Две разные клавиши, потому что при обеих надетых карточках одна не знала бы,
-  какую сворачивать, а OCGlasses не передаёт модификаторы.
-- **Подсказка прямо на карточке**: глиф в шапке — это и есть её клавиша (`-` или
-  `=`), так что разные хоткеи видно из HUD. На странице **Glasses** подсказка по
-  управлению переехала под каждый блок отдельно.
-
----
-
-## 2.5.0 — слежение за складом ME и страница настроек
-
-Второй блок функциональности из ME-сети: не что крафтится, а сколько чего лежит. У каждого
-буфера — свой список до пяти предметов/жидкостей, который выводится рядом с ним.
-
-- **Показывает количество** выбранных предметов и жидкостей из сети Applied Energistics
-  колонкой рядом с буфером на дашборде и, по желанию, третьей карточкой в очках. Количество —
-  главное поле; то, что кончилось, светится красным нулём, а не пропадает.
-- **Список — свой у каждого буфера**, потому что предметы приходят из одной сети, а привязка
-  к буферу организационная — ты решаешь, что смотреть «на фоне» этого LSC. Выбор — на странице
-  **Buffers**: табы Items/Fluids, фильтр по имени, снимок сети с Refresh.
-- **Опрос дешёвый**: один `getItemInNetwork` на предмет и один `getFluidsInNetwork` на все
-  жидкости — фиксированная горстка вызовов независимо от размера сети; один и тот же предмет
-  у двух буферов — один запрос. Тяжёлый `getItemsInNetwork` (весь инвентарь) тянется только
-  при открытии пикера, не в цикле. Списки обходятся `pairs` против дырок `convert()` — та же
-  грабля, что у крафтов. Диагностика — секция ME stock в `tools/medump.lua`.
-- **Только на GTNH-сборке OpenComputers**, как и крафты: геттеры из `NetworkControl.scala`
-  форка `1.11.20-GTNH`.
-
-Плюс новая страница **Settings** и автообновление:
-
-- **Настройки графика** переехали из тесного футера на отдельную страницу.
-- **Обновление из приложения**: проверяет `cdn.jsdelivr.net` на свежий релиз и по кнопке
-  пинится на тег и передаёт установку `setup.lua` — тот уже владеет списком файлов, бэкапом
-  настроек и проверкой, что версия реально легла. Скачивание и установка идут после выхода
-  из приложения, чтобы большой fetch не висел за статичным кадром. Проверка при старте —
-  опционально, по умолчанию выключена.
+- **Auto-update could install a version LOWER than the current one.** jsDelivr caches
+  `@latest` for hours, and the updater assumed "differs ⇒ can update" — without comparing
+  versions, so it offered and installed an old tag. Now the latest version is taken from
+  the jsDelivr data API (the list is sorted, the cache is fresher), and versions are
+  compared by SemVer: "Update now" appears **only if the version is strictly newer**. A
+  rollback is impossible.
+- **Character glasses hotkeys did not work in-game** (`[ ] F - =`, as well as `1-9`/`C`).
+  OCGlasses sends the key character as a Java `char`, and OpenComputers hands it to Lua
+  **as a single-character string** (`"["`), not the number `91` — a comparison against a
+  number never matched. Only the arrows worked (they come as a whole scan code). Now the
+  character is recognized both as a string and as a number. The test fixtures were switched
+  to the real string form so the bug no longer slips past.
 
 ---
 
-## 2.4.0 — крафты Applied Energistics
+## 2.5.2 — CPU numbering from 1 and busy diagnostics
 
-Новый блок функциональности: что автокрафт делает прямо сейчас. Страница **Crafting** на
-мониторе и отдельная карточка в очках рядом с энергетической.
-
-- **Показывает**: итоговый заказанный предмет, что сейчас в машинах, что ждёт, что уже
-  сделано, и подсветку зависших заданий с указанием, что должно было идти следующим.
-- **Только на GTNH-сборке OpenComputers.** Апстрим про запущенный крафт не сообщает ничего
-  (открытый [issue #3786](https://github.com/MightyPirates/OpenComputers/issues/3786)) —
-  всё стоит на `Cpu` из `NetworkControl.scala` форка `1.11.20-GTNH`: `activeItems`,
-  `pendingItems`, `storedItems`, `finalOutput`. `tools/medump.lua` скажет прямо, если
-  драйвер не тот.
-- **Требует Crafting Monitor в каждом CPU.** `finalOutput()` читается с
-  `TileCraftingMonitorTile` внутри кластера — без блока итог неизвестен, и программного
-  обхода нет. Цепочка при этом читается нормально; UI пишет, какой блок добавить, вместо `?`.
-- **Порядок и остановка выведены, а не прочитаны.** У AE2 нет ни очереди (задание — дерево
-  параллельных подзадач, `pendingItems` отдаёт множество), ни `isStalled()`. «Ожидает»
-  сортируется по количеству, и страница честно об этом пишет. Остановка ловится по тому,
-  что показания замерли: 120 сек общего порога — потому что рецепт GregTech идёт минутами, —
-  и отдельные 15 сек на случай «занят, работа есть, а в машинах пусто», который означает не
-  «медленно», а «стоит».
-- **Опрос дешевле, чем кажется**: свой интервал (2 сек), незанятые CPU не читаются вовсе.
-- **Управление не ломает привычки**: `←` `→` `1-9` `C` по-прежнему про энергию, у карточки
-  крафтов свои `[` `]` `F`. Карточка независима от энергетической — можно носить любую.
+- **Unnamed CPUs are numbered from 1**, the way a player counts them in the AE2 GUI (it
+  was from 0 — "5th and 6th" showed up as "4 and 5"). The internal id stays 0-based so it
+  matches the script over `getCpus()`.
+- **`tools/medump.lua` prints live `isBusy()` and `isActive()`** per CPU alongside
+  `entry.busy`. This is for investigating a known discrepancy: our "busy" counter is
+  `entry.busy` (== `CraftingCPUCluster.isBusy`), and on some builds it undercounts CPUs
+  that have a job but aren't pushing an item right now. The dump will show which of the
+  signals matches the real number — by which the counter will be corrected in the next
+  patch (and along with it card paging will start working: right now there are few busy
+  ones, and they fit on a single page).
 
 ---
 
-## 2.3.2 — тесты на настоящем сенсоре
+## 2.5.1 — collapsing AR cards
 
-Живой дамп с LSC из игры вскрыл три вещи, которых реконструированная по Java-исходникам
-фикстура не показывала. Фикстура заменена на реальный вывод — теперь тесты проверяют то,
-что есть, а не то, что я предполагал.
+A small improvement on top of 2.5.0: the crafting and ME-stock cards in the glasses can now
+be collapsed to a title strip so they don't take up your view.
 
-- **Исправлено: `EU IN`/`EU OUT` — мгновенные и почти всегда нули.** LSC передаёт энергию
-  рывками, и опрос почти всегда попадает в паузу. В дампе оба нуля, при том что средние за
-  5 минут — 77.3M и 85.9M EU/t. Отсюда вечный IDLE. Теперь берётся короткое скользящее
-  среднее (`Avg EU IN (last 5 seconds)`), мгновенная строка — запасной вариант, геттеры —
-  последний (в дампе они тоже нули на работающей машине).
-- **Исправлено: `2.64x10^11`, а не `2.64E11`.** Проверка научной нотации искала `E` и такой
-  формат не видела — число превращалось в мусор `2641011`. Спасало лишь то, что строка с
-  разделителями идёт первой. Оба написания разбираются.
-- **Исправлено: `multimachine.supercapacitor` вместо имени.** `getName()` отдаёт ключ
-  локализации. Если имя похоже на ключ (точки, нет пробелов), подставляется название
-  адаптера — `Lapotronic Supercapacitor`. Своё имя через `rename` по-прежнему главнее.
-- **Уточнён порог IDLE.** Пассивные потери вычитаются перед оценкой активности: LSC течёт
-  всегда, и сравнение с нулём объявляло бы `ONLINE` любой накопитель вечно.
+- **A collapse button in the header** of each card. A collapsed card shows only the title
+  (for crafts — the `busy/total` counter, for stock — the buffer name); a click on the strip
+  expands it back. The state is saved per-glasses and survives a restart.
+- **Hotkeys** in the Free Cursor overlay: `-` collapses the crafting card, `=` the stock
+  card. Two different keys, because with both cards worn one wouldn't know which to collapse,
+  and OCGlasses does not pass modifiers.
+- **A hint right on the card**: the glyph in the header is its key (`-` or `=`), so the
+  different hotkeys are visible from the HUD. On the **Glasses** page the control hint moved
+  under each block separately.
 
-## 2.3.1 — источник истины: заряд, а не счётчики GregTech
+---
 
-- **Исправлено: `NET` показывал −1.9k, пока буфер терял 700 миллионов.** В 2.3.0 я сделал
-  `EU IN`/`EU OUT` основой расчёта — они быстрее и точнее. Но они считают только то, что
-  прошло **через хатчи**: LSC в беспроводном режиме отдаёт энергию мимо них, и `NET`
-  превращался ровно в пассивные потери. Быстрое и неверное хуже медленного и верного —
-  основой снова стало **изменение заряда**, оно учитывает всё, куда бы энергия ни ушла.
-  Задержку компенсировал сокращением окна с 5 до 2 секунд, а не подменой источника.
-- **Исправлено: буфер числился IDLE, теряя сотни миллионов.** Состояние выводилось из тех же
-  слепых счётчиков. Теперь, если заряд заметно движется, буфер считается `ONLINE`, что бы ни
-  говорили счётчики. Сравнение идёт с **порогом шума**, а не с нулём: выше 2^53 соседние
-  double отстоят на ~2048 EU, и без этого состояние моргало бы от одного округления.
-- То же правило распространено на итоги за 5 минут и час.
+## 2.5.0 — ME stock tracking and a settings page
 
-Расхождение `NET` с `IN − OUT − LOSS` — теперь **не ошибка, а информация**: энергия движется
-там, где GregTech её не считает. В README это описано.
+The second block of functionality from the ME network: not what is being crafted, but how
+much of what is on hand. Each buffer has its own list of up to five items/fluids, shown next
+to it.
 
-## 2.3.0 — итоги энергии вместо средних, и починенные IDLE и NET
+- **Shows the quantity** of selected items and fluids from the Applied Energistics network
+  in a column next to the buffer on the dashboard and, optionally, as a third card in the
+  glasses. The quantity is the main field; what has run out glows as a red zero rather than
+  disappearing.
+- **The list is per-buffer**, because items come from a single network and the binding to a
+  buffer is organizational — you decide what to watch "in the background" of this LSC. The
+  choice is on the **Buffers** page: Items/Fluids tabs, a name filter, a network snapshot
+  with Refresh.
+- **Polling is cheap**: one `getItemInNetwork` per item and one `getFluidsInNetwork` for all
+  fluids — a fixed handful of calls regardless of network size; the same item on two buffers
+  is one request. The heavy `getItemsInNetwork` (the whole inventory) is pulled only when the
+  picker is opened, not in the loop. Lists are walked with `pairs` against `convert()` holes
+  — the same pitfall as with crafts. Diagnostics — the ME stock section in `tools/medump.lua`.
+- **Only on the GTNH build of OpenComputers**, like crafts: the getters from
+  `NetworkControl.scala` of the `1.11.20-GTNH` fork.
 
-- **«Сколько прошло», а не «с какой скоростью».** Строки за 5 минут и час теперь показывают
-  **сколько энергии всего** пришло и ушло, отдельными колонками, плюс итог. Средняя скорость
-  на вопрос «сколько я потратил за час» ответить не может: час бурной работы, где приход и
-  расход сошлись, выглядит как час простоя. `net` всегда равен `received − sent` — колонки
-  читаются рядом, и если бы они не сходились, панели нельзя было бы верить.
-- **Исправлено: буфер вечно висел в IDLE.** В `core/sources/lsc.lua` стояло
-  `util.callNumber(proxy, "getEUInputAverage") or sensor.value(lines, "^%s*EU IN")`, а **ноль
-  в Lua — истина**: геттер, отвечающий `0`, обрывал `or`, и строка сенсора с настоящим
-  `EU IN: 32,768` не читалась никогда. Приход и расход нулевые → состояние IDLE. Теперь
-  строки сенсора идут первыми (их GregTech показывает в GUI самой машины), геттеры —
-  запасным вариантом.
-- **Исправлено: `NET` отставал от графика.** Скорость всегда мерялась по изменению заряда —
-  это скользящее окно в 5 секунд, оно отстаёт. Хуже того, на большом LSC ещё и неточно: выше
-  2^53 шаг double около 1000 EU, и небольшой ток тонет в шуме округления. GregTech усредняет
-  `EU IN`/`EU OUT` за 20 тиков сам — быстрее и точнее. Измерение по заряду осталось там, где
-  источник проход не сообщает: хранилища IC2 и беспроводная сеть.
+Plus a new **Settings** page and auto-update:
 
-## 2.2.1 — исправлен краш на странице Network
+- **Graph settings** moved out of the cramped footer onto a separate page.
+- **Updating from the app**: it checks `cdn.jsdelivr.net` for a fresh release and, at the
+  press of a button, pins to a tag and hands the install off to `setup.lua` — which already
+  owns the file list, the settings backup, and the check that the version actually landed.
+  Download and install happen after exiting the app, so a large fetch doesn't hang behind a
+  static frame. The check at startup is optional, off by default.
 
-- **Исправлено: `attempt to call a nil value (method 'key')`** сразу после обновления на
-  2.2.0. Виноват не ключ сети, а кеш `require`: `init.lua` вычищает из `package.loaded`
-  только перечисленные неймспейсы, а `net` в список не попал — модули добавились в 2.1.0,
-  список не обновили. В итоге `require("net")` отдавал версию, загруженную при старте
-  компьютера, без нового метода.
-- Список неймспейсов теперь **проверяется тестом**: он сверяет объявленный в `init.lua`
-  список с тем, что реально загружается, и заодно следит, чтобы список не выкидывал
-  библиотеки самого OpenOS. Забыть неймспейс снова не получится.
+---
 
-На 2.2.0 то же самое лечится перезагрузкой компьютера (`reboot`).
+## 2.4.0 — Applied Energistics crafts
 
-## 2.2.0 — ключ сети: разделение баз на общем сервере
+A new block of functionality: what autocrafting is doing right now. A **Crafting** page on
+the monitor and a separate card in the glasses next to the energy one.
 
-- **Network key.** На общем сервере ARGUS может стоять не у вас одного, а `modem.broadcast`
-  получает **любой** модем в радиусе, открывший тот же порт — и порт по умолчанию у всех
-  одинаковый. Без ключа сервер соседа опрашивал бы ваши клиенты, а ваш сервер собирал бы
-  чужие базы в свой список и агрегат. Теперь каждое сообщение несёт ключ, и всё чужое
-  отбрасывается в обе стороны.
-- Ключ по умолчанию выводится из адреса компьютера: уникален, стабилен между
-  перезагрузками, случайно совпасть не может. На клиентах вводится серверный — на странице
-  **Network**.
+- **Shows**: the final ordered item, what is in the machines now, what is waiting, what is
+  already done, and highlighting of stalled jobs with a note on what was supposed to go next.
+- **Only on the GTNH build of OpenComputers.** Upstream reports nothing about a running
+  craft (open [issue #3786](https://github.com/MightyPirates/OpenComputers/issues/3786)) —
+  everything rests on `Cpu` from `NetworkControl.scala` of the `1.11.20-GTNH` fork:
+  `activeItems`, `pendingItems`, `storedItems`, `finalOutput`. `tools/medump.lua` will say
+  outright if the driver is the wrong one.
+- **Requires a Crafting Monitor in each CPU.** `finalOutput()` is read from
+  `TileCraftingMonitorTile` inside the cluster — without the block the final output is
+  unknown, and there is no programmatic workaround. The chain is read fine regardless; the
+  UI writes which block to add instead of `?`.
+- **Order and stalling are inferred, not read.** AE2 has neither a queue (a job is a tree of
+  parallel subtasks, `pendingItems` returns a set) nor `isStalled()`. "Waiting" is sorted by
+  quantity, and the page says so honestly. Stalling is caught by the readings going still:
+  120 sec as the general threshold — because a GregTech recipe runs for minutes — and a
+  separate 15 sec for the "busy, there's work, but the machines are empty" case, which means
+  not "slow" but "stuck".
+- **Polling is cheaper than it looks**: its own interval (2 sec), idle CPUs aren't read at all.
+- **The controls don't break habits**: `←` `→` `1-9` `C` are still about energy, the
+  crafting card has its own `[` `]` `F`. The card is independent of the energy one — you can
+  wear either.
 
-Честно про границы: ключ — это **SSID, а не пароль**. Он избавляет от пересечений, но не от
-подслушивания: сообщения идут открытым текстом, шифрования в OpenComputers нет, и кто угодно
-в радиусе, зная ключ, сможет подключиться. Для настоящей изоляции — **Linked Card**: связь
-точка-точка, принять её больше некому.
+---
 
-## 2.1.0 — распределённый режим: сервер и клиенты
+## 2.3.2 — tests on the real sensor
 
-- **Несколько баз на одном экране.** На странице **Network** выбирается роль:
-  `standalone`, `server` или `client`. Сервер опрашивает клиентов, их буферы появляются
-  в списке, на панели, в очках и **в агрегате** — «все буферы» перестало означать «все
-  буферы этой сети».
-- **Сервер видит подключённых клиентов**: имя, адрес, число буферов, статус, расстояние,
-  когда отвечал последний раз. Кнопка `forget` убирает пропавшего.
-- **Два транспорта, один протокол.** Беспроводная карта (400 блоков на T2, одно измерение)
-  и Linked Card (безлимит, между мирами, строго 1:1) доставляют одинаково — через сигнал
-  `modem_message`. Ответ уходит той же картой, которой пришёл запрос, чтобы не будить
-  остальные базы. Тег протокола отсекает чужой трафик на том же порту.
-- **Watchdog.** У беспроводной связи нет сигнала обрыва — молчание единственный симптом.
-  Клиент, не ответивший дольше таймаута, помечается `OFFLINE`, его буферы читаются как
-  `MISSING` и выпадают из агрегата: показывать последние известные числа как актуальные
-  было бы враньём.
+A live dump from an in-game LSC exposed three things the fixture reconstructed from the Java
+sources didn't show. The fixture was replaced with real output — now the tests check what is
+there, not what I assumed.
 
-Почему именно так, а не «объединить сети»: сети OpenComputers **нельзя** соединить без
-проводов, и это устройство мода, а не преграда. Видимость компонента существует только
-внутри одного объекта `Network`, сети соединяются через `Node.connect()` — физический
-контакт, — и даже проводной Relay держит каждую свою сторону в отдельной сети. Его
-документация прямо: *"without exposing components to computers in other networks"*.
-Поэтому клиент читает свои буферы сам и шлёт **готовые числа**. Опрос — pull-моделью:
-сервер спрашивает по своему расписанию, что держит частоту под контролем, исключает шторм
-при одновременном старте баз и не требует состояния подписок, переживающего перезагрузку.
+- **Fixed: `EU IN`/`EU OUT` are instantaneous and almost always zero.** The LSC transfers
+  energy in bursts, and polling almost always lands in a pause. In the dump both are zero,
+  even though the 5-minute averages are 77.3M and 85.9M EU/t. Hence the perpetual IDLE. Now
+  a short moving average is used (`Avg EU IN (last 5 seconds)`), the instantaneous string is
+  the fallback, the getters are the last resort (in the dump they too are zero on a working
+  machine).
+- **Fixed: `2.64x10^11`, not `2.64E11`.** The scientific-notation check looked for `E` and
+  didn't see this format — the number turned into garbage `2641011`. Only the fact that the
+  string with separators comes first saved it. Both spellings are now parsed.
+- **Fixed: `multimachine.supercapacitor` instead of a name.** `getName()` returns a
+  localization key. If the name looks like a key (dots, no spaces), the adapter's name is
+  substituted — `Lapotronic Supercapacitor`. A custom name via `rename` still takes
+  precedence.
+- **The IDLE threshold was refined.** Passive loss is subtracted before assessing activity:
+  the LSC always leaks, and a comparison against zero would declare any accumulator `ONLINE`
+  forever.
 
-Как соединять сети — [раздел в README](README.md#несколько-баз-сервер-и-клиенты).
+## 2.3.1 — source of truth: charge, not GregTech counters
 
-## 2.0.0 — переименование в ARGUS
+- **Fixed: `NET` showed −1.9k while the buffer lost 700 million.** In 2.3.0 I made
+  `EU IN`/`EU OUT` the basis of the calculation — they are faster and more accurate. But
+  they count only what passed **through the hatches**: an LSC in wireless mode gives energy
+  away past them, and `NET` turned into exactly the passive loss. Fast and wrong is worse
+  than slow and right — the basis is once again the **change in charge**, which accounts for
+  everything, wherever the energy went. The lag was compensated by shrinking the window from
+  5 to 2 seconds, not by swapping the source.
+- **Fixed: a buffer was listed as IDLE while losing hundreds of millions.** The state was
+  inferred from the same blind counters. Now, if the charge moves noticeably, the buffer is
+  considered `ONLINE`, whatever the counters say. The comparison is against a **noise
+  threshold**, not zero: above 2^53 adjacent doubles are ~2048 EU apart, and without this the
+  state would flicker from a single rounding.
+- The same rule was extended to the 5-minute and hour totals.
 
-**Ломающее:** каталог установки `/home/EMON` → `/home/ARGUS`.
+The divergence of `NET` from `IN − OUT − LOSS` is now **not an error but information**:
+energy is moving where GregTech doesn't count it. This is described in the README.
 
-- Проект переименован из **EMON** (Energy MONitor) в **ARGUS** — приложение будет обрастать
-  функционалом за пределами энергии, и прежнее имя стало бы враньём. Репозиторий:
+## 2.3.0 — energy totals instead of averages, and fixed IDLE and NET
+
+- **"How much passed", not "at what rate".** The 5-minute and hour lines now show **how much
+  energy in total** came in and went out, in separate columns, plus a total. An average rate
+  can't answer "how much did I spend in an hour": an hour of frenetic work where input and
+  output balanced out looks like an hour of idle. `net` always equals `received − sent` —
+  the columns are read side by side, and if they didn't add up, the panel couldn't be
+  trusted.
+- **Fixed: a buffer hung in IDLE forever.** In `core/sources/lsc.lua` there was
+  `util.callNumber(proxy, "getEUInputAverage") or sensor.value(lines, "^%s*EU IN")`, and
+  **zero in Lua is truthy**: a getter answering `0` short-circuited the `or`, and the sensor
+  string with a real `EU IN: 32,768` was never read. Input and output zero → IDLE state. Now
+  the sensor strings come first (GregTech shows them in the machine's own GUI), the getters
+  are the fallback.
+- **Fixed: `NET` lagged behind the graph.** The rate was always measured by the change in
+  charge — a 5-second sliding window, and it lags. Worse, on a large LSC it is also
+  imprecise: above 2^53 the double step is about 1000 EU, and a small current drowns in
+  rounding noise. GregTech averages `EU IN`/`EU OUT` over 20 ticks itself — faster and more
+  accurate. Measurement by charge stayed where the source doesn't report throughput: IC2
+  storages and the wireless network.
+
+## 2.2.1 — fixed the crash on the Network page
+
+- **Fixed: `attempt to call a nil value (method 'key')`** right after updating to 2.2.0. The
+  culprit wasn't the network key but the `require` cache: `init.lua` clears only the listed
+  namespaces from `package.loaded`, and `net` didn't make the list — the modules were added
+  in 2.1.0, the list wasn't updated. As a result `require("net")` handed back the version
+  loaded at computer boot, without the new method.
+- The namespace list is now **checked by a test**: it compares the list declared in
+  `init.lua` against what actually loads, and at the same time makes sure the list doesn't
+  drop OpenOS's own libraries. Forgetting a namespace again won't be possible.
+
+On 2.2.0 the same thing is cured by rebooting the computer (`reboot`).
+
+## 2.2.0 — network key: separating bases on a shared server
+
+- **Network key.** On a shared server ARGUS may not be yours alone, and `modem.broadcast` is
+  received by **any** modem in range that opened the same port — and the default port is the
+  same for everyone. Without a key, a neighbor's server would poll your clients, and your
+  server would gather other people's bases into its list and aggregate. Now every message
+  carries a key, and everything foreign is discarded in both directions.
+- The default key is derived from the computer's address: unique, stable across reboots,
+  cannot collide by chance. On clients the server's key is entered — on the **Network** page.
+
+Honest about the limits: the key is an **SSID, not a password**. It prevents crossovers but
+not eavesdropping: messages go in the clear, there is no encryption in OpenComputers, and
+anyone in range who knows the key can connect. For real isolation — a **Linked Card**: a
+point-to-point link with no one else to receive it.
+
+## 2.1.0 — distributed mode: server and clients
+
+- **Several bases on one screen.** On the **Network** page a role is chosen: `standalone`,
+  `server`, or `client`. The server polls the clients, their buffers appear in the list, on
+  the panel, in the glasses, and **in the aggregate** — "all buffers" stopped meaning "all
+  buffers of this network".
+- **The server sees connected clients**: name, address, buffer count, status, distance, when
+  it last answered. A `forget` button removes a vanished one.
+- **Two transports, one protocol.** A wireless card (400 blocks on T2, one dimension) and a
+  Linked Card (unlimited, cross-world, strictly 1:1) deliver the same way — through the
+  `modem_message` signal. The reply goes out on the same card the request arrived on, so as
+  not to wake the other bases. The protocol tag cuts off foreign traffic on the same port.
+- **Watchdog.** Wireless has no disconnect signal — silence is the only symptom. A client
+  that hasn't answered for longer than the timeout is marked `OFFLINE`, its buffers are read
+  as `MISSING` and drop out of the aggregate: showing the last known numbers as current would
+  be a lie.
+
+Why this way, and not "merge the networks": OpenComputers networks **cannot** be joined
+without wires, and this is a design of the mod, not an obstacle. A component's visibility
+exists only within a single `Network` object, networks are joined through `Node.connect()` —
+physical contact — and even a wired Relay keeps each of its sides in a separate network. Its
+documentation says outright: *"without exposing components to computers in other networks"*.
+So the client reads its own buffers itself and sends **ready-made numbers**. Polling is
+pull-model: the server asks on its own schedule, which keeps the frequency under control,
+rules out a storm when bases start simultaneously, and requires no subscription state that
+survives a reboot.
+
+How to connect networks — [README section](README.md#multiple-bases-server-and-clients).
+
+## 2.0.0 — renamed to ARGUS
+
+**Breaking:** the install directory `/home/EMON` → `/home/ARGUS`.
+
+- The project was renamed from **EMON** (Energy MONitor) to **ARGUS** — the app will grow
+  functionality beyond energy, and the old name would become a lie. Repository:
   `monitoring-app` → `ARGUS`.
-- Установщик мигрирует сам: находит `/home/EMON`, переносит настройки, перенастраивает
-  автозапуск на новый путь, удаляет старый каталог.
-- **Исправлено: `setup --clean` уничтожал настройки** начиная с 1.2.1. Настройки сохранялись
-  через `filesystem.copy(".../settings", backup)`, но OpenOS реализует `copy` как
-  `filesystem.open(from, "rb")` — на каталоге это молча возвращает `false`. Копирование не
-  происходило, следующий за ним wipe уносил настройки, а установщик всё это время писал
-  «settings kept». Теперь копируется сам файл конфига, и об успехе сообщается только по факту.
-- Исправлено: имя источника в шапке стояло на захардкоженном отступе `x+5`, подогнанном под
-  четырёхбуквенное имя — на пятибуквенном ARGUS слиплось. Ширина теперь измеряется.
+- The installer migrates itself: it finds `/home/EMON`, moves the settings, reconfigures
+  autostart to the new path, deletes the old directory.
+- **Fixed: `setup --clean` destroyed the settings** starting from 1.2.1. Settings were saved
+  via `filesystem.copy(".../settings", backup)`, but OpenOS implements `copy` as
+  `filesystem.open(from, "rb")` — on a directory this silently returns `false`. The copy
+  didn't happen, the wipe that followed carried the settings off, and the installer wrote
+  "settings kept" the whole time. Now the config file itself is copied, and success is
+  reported only after the fact.
+- Fixed: the source name in the header sat at a hardcoded offset `x+5`, tuned for a
+  four-letter name — on the five-letter ARGUS it ran together. The width is now measured.
 
-## 1.4.0 — конец мерцанию, настраиваемый график
+## 1.4.0 — end of flicker, a configurable graph
 
-- **Экран больше не мерцает.** Кадр собирается в закадровом GPU-буфере и выводится одним
-  `bitblt`. Раньше каждый кадр рисовался прямо на экран: `clear()` гасил всё, а сотня
-  `gpu.set` заполняла заново — недорисованный кадр был виден. Требует GPU T3; без него
-  работает как прежде.
-- **Окно графика настраивается**, шаг точек выводится из него. График — 120 колонок, значит
-  **шаг = окно / 120**: окно 2 минуты даёт ровно **одну точку в секунду**. Пресеты кнопкой
-  `Graph` (30 с … 1 час), ввод числом — кнопкой `set`. Шаг подписан над графиком
-  (`1s/pt`) — одна и та же кривая при 1 с и 30 с на точку означает разное.
-- Памяти стало нужно меньше: одно кольцо, следующее за окном, вместо кольца на шкалу.
+- **The screen no longer flickers.** The frame is assembled in an off-screen GPU buffer and
+  output with a single `bitblt`. Previously each frame was drawn directly to the screen:
+  `clear()` blanked everything, and a hundred `gpu.set` calls filled it back in — a
+  half-drawn frame was visible. Requires GPU T3; without it, it works as before.
+- **The graph window is configurable**, the point step is derived from it. The graph is 120
+  columns, so **step = window / 120**: a 2-minute window gives exactly **one point per
+  second**. Presets via the `Graph` button (30 s … 1 hour), numeric entry via the `set`
+  button. The step is labeled above the graph (`1s/pt`) — the same curve at 1 s and 30 s per
+  point means different things.
+- Less memory is needed: one ring following the window, instead of a ring per scale.
 
-## 1.3.0 — свои имена, точные координаты, плавная шкала
+## 1.3.0 — custom names, precise coordinates, a smooth bar
 
-- **Свои имена буферов** — кнопка `rename`. Имя используется везде: шапка, список,
-  AR-панель, подпись wireless-сети. **Переживает `Rescan`**: имя машины хранится отдельно
-  в `detectedName` и не затирает пользовательское.
-- **Точное позиционирование AR-панели**: якорь `manual` делает `X`/`Y` абсолютными
-  координатами в системе очков. Значения можно **вводить с клавиатуры** (появилось поле
-  ввода — раньше его в приложении не было вообще), а не только стрелками по 4 пикселя.
-- **Шкала заряда движется плавно.** Раньше `setBar` ставил вершины сразу в цель, а частота
-  отрисовки была привязана к частоте опроса компонентов — 4 кадра в секунду. Опрос теперь
-  идёт по своему расписанию, цикл тикает 10 Гц и анимирует.
-- Исправлено: полоса имела минимальную ширину, из-за чего на 0% всегда торчал огрызок в
-  пиксель. Пустой буфер рисуется пустым; на переднем крае появилась яркая насечка.
+- **Custom buffer names** — the `rename` button. The name is used everywhere: header, list,
+  AR panel, wireless-network label. **Survives `Rescan`**: the machine name is stored
+  separately in `detectedName` and doesn't overwrite the user's.
+- **Precise AR-panel positioning**: the `manual` anchor makes `X`/`Y` absolute coordinates in
+  the glasses' system. The values can be **entered from the keyboard** (an input field
+  appeared — before, there was none in the app at all), not just nudged by arrows 4 pixels at
+  a time.
+- **The charge bar moves smoothly.** Previously `setBar` set the tips straight to the target,
+  and the render rate was tied to the component-poll rate — 4 frames per second. Polling now
+  runs on its own schedule, the loop ticks at 10 Hz and animates.
+- Fixed: the bar had a minimum width, so at 0% a one-pixel stub always stuck out. An empty
+  buffer is drawn empty; a bright notch appeared on the leading edge.
 
-## 1.2.2 — обновление больше не требует перезагрузки
+## 1.2.2 — updating no longer requires a reboot
 
-- **Исправлено: обновление могло не вступать в силу.** Установка проходила корректно, файлы
-  на диске были новые, а приложение падало с `attempt to call a nil value` на функции,
-  которая в файле есть. Причина — кеш `require` в OpenOS: компьютер работает в одном
-  Lua-стейте, `package.loaded` живёт до перезагрузки. Скрипты (`init.lua`, `sensordump.lua`)
-  читаются с диска, а `require`-модули — нет, отсюда смесь нового и старого кода.
-  Обе точки входа теперь чистят свои модули из `package.loaded`.
+- **Fixed: an update might not take effect.** The install went through correctly, the files
+  on disk were new, and the app crashed with `attempt to call a nil value` on a function that
+  is in the file. The cause is OpenOS's `require` cache: the computer runs in a single Lua
+  state, `package.loaded` lives until reboot. Scripts (`init.lua`, `sensordump.lua`) are read
+  from disk, but `require` modules are not, hence a mix of new and old code. Both entry points
+  now clear their modules from `package.loaded`.
 
-## 1.2.1 — чистая переустановка и проверка результата
+## 1.2.1 — clean reinstall and result verification
 
-- **Установщик проверяет, что реально легло на диск**, а не верит скачиванию: успешный
-  запрос ≠ нужные байты, CDN отдаёт кеш старого коммита и честно возвращает 200. Читает
-  `version.lua` с диска и сверяет с ожидаемой версией.
-- **`--clean`** — снести каталог и поставить заново (настройки сохраняются; фактически
-  заработало только в 2.0.0, см. выше).
-- В командах обновления обязателен `&&`: при упавшем `wget` запускался **старый**
-  `/home/setup.lua` и молча ставил не то.
+- **The installer verifies what actually landed on disk**, rather than trusting the download:
+  a successful request ≠ the right bytes, the CDN serves the cache of an old commit and
+  honestly returns 200. It reads `version.lua` from disk and checks it against the expected
+  version.
+- **`--clean`** — wipe the directory and install fresh (settings are preserved; it actually
+  worked only in 2.0.0, see above).
+- In update commands `&&` is mandatory: on a failed `wget` the **old** `/home/setup.lua` ran
+  and silently installed the wrong thing.
 
-## 1.2.0 — установка с неизменяемого тега
+## 1.2.0 — installing from an immutable tag
 
-- **По умолчанию тег, а не ветка.** jsDelivr кеширует ссылку на ветку **по каждому файлу
-  отдельно** на часы, поэтому `@main` собирал установку из разных коммитов, и все запросы
-  при этом были успешны. Теги и SHA неизменяемы.
-- **Видна установленная версия** — `v2.0.0 @ref` в правом нижнем углу. Раньше `version.lua`
-  ни разу не менялся, и отличить обновившуюся установку от застрявшей было нечем.
+- **A tag by default, not a branch.** jsDelivr caches a branch link **per file separately**
+  for hours, so `@main` assembled the install from different commits, and all requests were
+  successful at that. Tags and SHAs are immutable.
+- **The installed version is visible** — `v2.0.0 @ref` in the bottom-right corner.
+  Previously `version.lua` never changed, and there was no way to tell an updated install
+  from a stuck one.
 
-## До 1.2.0 (без тегов)
+## Before 1.2.0 (no tags)
 
-- **Исправлено: буферы не определялись вообще.** Проверка методов шла через
-  `type(x) == "function"`, а OpenComputers отдаёт методы прокси **вызываемыми таблицами** —
-  отвергался каждый метод каждого компонента, здоровый LSC выглядел пустым. Фикстуры тестов
-  использовали плоские функции и потому пропускали баг; теперь воспроизводят реальную форму.
-- **Переключение источника прямо из очков** — `hud_click` / `hud_keyboard` от OCGlasses.
-  Интерактивных виджетов мод не даёт, поэтому кнопки `‹ ›` нарисованы вручную с
-  собственным хит-тестом; плюс горячие клавиши `← →`, `1`…`9`, `C`. Размер панели берётся
-  из `glasses_on` — без совпадения масштаба клики не попадали бы в кнопки.
-- **Положение AR-панели настраивается** — шесть углов + смещение. По умолчанию `top-left`:
-  внизу слева чат, внизу по центру хотбар, вверху справа зелья.
-- **Установщик перебирает зеркала.** `raw.githubusercontent.com` недоступен с сервера
-  пользователя — TLS-рукопожатие рвётся. Зеркала на редиректах исключены сознательно: OC не
-  следует редиректу со сменой хоста и сохранил бы HTML.
-- `tools/sensordump.lua` печатает **все** компоненты, а не только `gt_*` — иначе два самых
-  важных случая (машина не отдана в сеть / неизвестный тип) выглядели одинаково пустым экраном.
-- Исправлено: выключенный буфер пропадал из списка навсегда и включить его было нельзя.
+- **Fixed: buffers weren't detected at all.** The method check went through
+  `type(x) == "function"`, but OpenComputers returns proxy methods as **callable tables** —
+  every method of every component was rejected, a healthy LSC looked empty. The test fixtures
+  used flat functions and so missed the bug; now they reproduce the real shape.
+- **Switching the source right from the glasses** — `hud_click` / `hud_keyboard` from
+  OCGlasses. The mod gives no interactive widgets, so the `‹ ›` buttons are drawn by hand with
+  their own hit-test; plus hotkeys `← →`, `1`…`9`, `C`. The panel size is taken from
+  `glasses_on` — without matching the scale, clicks wouldn't land on the buttons.
+- **The AR-panel position is configurable** — six corners + offset. The default is
+  `top-left`: bottom-left is chat, bottom-center the hotbar, top-right potions.
+- **The installer iterates over mirrors.** `raw.githubusercontent.com` is unreachable from
+  the user's server — the TLS handshake breaks. Redirect-based mirrors are excluded
+  deliberately: OC doesn't follow a redirect that changes host and would save the HTML.
+- `tools/sensordump.lua` prints **all** components, not just `gt_*` — otherwise the two most
+  important cases (a machine not exposed to the network / an unknown type) looked the same:
+  an empty screen.
+- Fixed: a disabled buffer disappeared from the list forever and couldn't be re-enabled.
 
-## 1.0.0 — первый выпуск
+## 1.0.0 — first release
 
-Основано на [NIDAS](https://github.com/S4mpsa/NIDAS): взят графический слой, всё остальное
-(мультиблоки, инфузии, флюиды, сеть серверов) вырезано, слой данных и панель написаны заново.
+The graphics layer was taken from the predecessor project (provenance — in
+[NOTICE.md](NOTICE.md)); everything else (multiblocks, infusions, fluids, the server network)
+was cut, the data layer and the panel were written anew.
 
-- **Все типы энергобуферов**: LSC, Battery Buffer, беспроводная EU-сеть, IC2-хранилища,
-  и любой GregTech-блок с запасом EU через универсальный адаптер. Тип определяется
-  **скорингом**, а не по типу компонента: LSC и энергохатч оба `gt_machine` и различаются
-  только по строкам сенсора.
-- **Два вывода одновременно** — монитор и AR-очки, независимо друг от друга.
-- **Переключение и агрегация**: конкретный буфер, сумма всех, либо циклический перебор.
-- Метрики: EU/t, средние за 5 мин и час, время до полного/пустого, пассивные потери,
-  статус обслуживания. График заряда.
-- Автообнаружение компонентов, `Rescan`.
+- **All types of energy buffers**: LSC, Battery Buffer, wireless EU network, IC2 storages,
+  and any GregTech block with an EU reserve via a universal adapter. The type is determined
+  by **scoring**, not by component type: an LSC and an energy hatch are both `gt_machine` and
+  differ only by the sensor strings.
+- **Two outputs at once** — the monitor and the AR glasses, independently of each other.
+- **Switching and aggregation**: a specific buffer, the sum of all, or a cyclic rotation.
+- Metrics: EU/t, 5-minute and hour averages, time to full/empty, passive loss, maintenance
+  status. A charge graph.
+- Component auto-detection, `Rescan`.
 
-Ключевые отличия от NIDAS, найденные при разборе исходников GT5U `5.09.51.482`:
+Key decisions found while digging through the GT5U `5.09.51.482` sources:
 
-- **Парсинг по лейблам, а не по индексам.** NIDAS брал `[2]`, `[5]`, `[23]` — аддон
-  вставляет строку, и вместо ошибки получаются молча неверные числа.
-- **Точность.** У LSC заряд — BigInteger, но `getEUVar()` делает `longValue()`, что
-  **обрезает**: выше 2^63 `getEUStored()` врёт (починено только в 2.9). Плюс числа Lua —
-  double, выше 2^53 значение непредставимо. Заряд хранится и числом, и точной строкой.
-- **Скорость меряется по изменению заряда**, а не «IN минус OUT»: работает даже для
-  IC2-хранилищ, которые проход энергии не сообщают, и учитывает пассивные потери.
-- Унаследованные баги NIDAS не перенесены: Battery Buffer там не определялся никогда
-  (`component.list()` индексировался сокращённым адресом, а ключуется полным UUID);
-  состояния сравнивались по ссылке и ломались после сериализации; `getInteger` терял знак.
-- **Требования к железу ниже**: NIDAS рендерит через буферы видеопамяти (GPU T3), ARGUS
-  рисует напрямую (двойная буферизация вернулась опционально в 1.4.0).
+- **Parsing by labels, not by indices.** A naive parse takes `[2]`, `[5]`, `[23]` — an addon
+  inserts a string, and instead of an error you get silently wrong numbers.
+- **Precision.** On an LSC the charge is a BigInteger, but `getEUVar()` does `longValue()`,
+  which **truncates**: above 2^63 `getEUStored()` lies (fixed only in 2.9). Plus Lua numbers
+  are doubles, above 2^53 the value is not representable. The charge is stored both as a
+  number and as an exact string.
+- **The rate is measured by the change in charge**, not "IN minus OUT": it works even for IC2
+  storages, which don't report energy throughput, and it accounts for passive loss.
+- The typical bugs of a naive implementation are avoided: otherwise a Battery Buffer wouldn't
+  be detected (`component.list()` is keyed by the full UUID, not the shortened address);
+  table-states would break after serialization; the sign is preserved in `getInteger`.
+- **Hardware requirements are lower**: instead of rendering through video-memory buffers
+  (GPU T3), ARGUS draws directly (double buffering came back optionally in 1.4.0).
