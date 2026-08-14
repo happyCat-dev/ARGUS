@@ -1,607 +1,193 @@
-# ARGUS — мониторинг энергии для OpenComputers
+# ARGUS — energy monitoring for OpenComputers
 
-Приложение для мода **OpenComputers** под сборку **GregTech: New Horizons 2.8.3**.
-Показывает состояние энергобуферов на мониторе и/или в AR-очках.
+**English** · [Русский](README.ru.md)
 
-Сделано на основе [NIDAS](https://github.com/S4mpsa/NIDAS): взят графический слой,
-всё остальное (мультиблоки, инфузии, флюиды, сеть серверов) вырезано, а слой данных
-и панель энергии переписаны заново.
+A Lua app for the **OpenComputers** mod on **GregTech: New Horizons 2.8.3**. Shows the state
+of your energy buffers on the computer screen and in AR glasses at the same time.
 
-[История версий](CHANGELOG.md) · [Контекст для разработки](DETAILS.md) · [Лицензия и происхождение](NOTICE.md)
+The data layer and energy panel are written against the mod sources that actually ship in
+2.8.3 — so it reads what GregTech really returns, not what a generic monitor assumes.
 
-```
- ARGUS · All buffers                                                            ● ONLINE
- ──────────────────────────────────────────────────────────────────────────────────────
+[Changelog](CHANGELOG.md) · [Development context](DETAILS.md) · [License & provenance](NOTICE.md)
 
- 62.5%                                                              Time to full  2d 4h
- █████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+![ARGUS dashboard — charge, rates, energy moved and the charge graph](docs/dashboard.png)
 
- 9,223,372,036,854,775,807 EU / 14.8E EU
+*…and the same buffer, crafting queue and ME stock mirrored into AR glasses:*
 
- NET    +1.2M EU/t      IN     32.8k EU/t      OUT    1.2M EU/t      LOSS   1.3k EU/t
+![ARGUS in AR glasses — ME stock, main buffer and crafting cards](docs/glasses-hud.png)
 
- Energy moved    received        sent            net
-  last 5 min     176.9M EU       5.8G EU         -5.6G EU
-  last 1 h       2.6G EU         103.7G EU       -101.1G EU
+## Features
 
- Charge · last 10 min · 5s/pt
- ▁▂▃▅▆▇█▇▆▅▃▂▁▂▃▅▆▇█▇▆▅▃▂▁▂▃▅▆▇█▇▆▅▃▂▁                                       9.2E EU
- ──────────────────────────────────────────────────────────────────────────────────────
- [ Dashboard ] [ Buffers ] [ Glasses ] [ Crafting ] [ Network ] [ Graph: 10 min ] [ Save ]
-```
+- **Every kind of EU buffer**: Lapotronic Supercapacitor, Battery Buffer, the wireless EU
+  network, IC2 storage (BatBox / CESU / MFE / MFSU / AFSU), and any GregTech block with an
+  EU store (energy hatches, transformers) through a universal adapter.
+- **Two outputs at once**: the screen and AR glasses run together and independently. Each
+  shows a specific buffer, the sum of all of them, or cycles through them.
+- **Metrics that mean something**: in/out in EU/t, **how much energy total** moved in the
+  last 5 min and last hour (received and sent separately), time to full or empty, passive
+  loss, maintenance status.
+- **More accurate than a naïve monitor**: LSC charge is read from the sensor strings, not
+  from `getEUStored()` (which lies above 2⁶³); `NET` is measured from the charge delta and
+  catches drain into the wireless network past the hatches (see [Accuracy and
+  internals](#accuracy-and-internals)).
+- **Applied Energistics crafting**: what was ordered, what's in the machines, what's queued,
+  and stalled-job highlighting — on the monitor and as a card in the glasses.
+- **ME stock tracking**: the count of selected items and fluids in the network, as a card in
+  the glasses.
+- **Charge graph** with a window from 30 s to a full day; the point step follows the window
+  (always 120 columns).
+- **Multiple bases**: server/client mode — remote bases hand over their buffers via a
+  wireless or Linked card, and a network key separates you from other players.
 
-## Возможности
+## Requirements
 
-- **Поддержка всех типов энергобуферов**: Lapotronic Supercapacitor, Battery Buffer,
-  беспроводная EU-сеть, хранилища IC2 (BatBox / CESU / MFE / MFSU / AFSU), а также любой
-  GregTech-блок с запасом EU (энергохатчи, трансформаторы) через универсальный адаптер.
-- **Переключение и агрегация**: каждый экран и каждые очки могут показывать конкретный
-  буфер, сумму всех буферов, либо циклически перебирать их. Настраивается в приложении.
-- **Автообнаружение**: приложение само находит подключённые компоненты; кнопка
-  `Rescan components` перечитывает список.
-- **Два вывода одновременно**: монитор и AR-очки работают вместе и независимо.
-- **Метрики**: текущий приход/расход в EU/t, **сколько энергии всего** прошло за 5 минут и
-  за час (отдельно приход и расход), время до полного заряда или разряда, пассивные потери,
-  статус обслуживания.
-- **Несколько баз**: режим сервер/клиент — удалённые базы отдают свои буферы по
-  беспроводной карте или Linked Card, ключ сети отделяет вас от других игроков.
-- **Крафты Applied Energistics**: что заказано, что сейчас в машинах, что ждёт очереди, и
-  подсветка зависших заданий — на мониторе и отдельной карточкой в очках.
-- **График заряда** с настраиваемым окном от 30 секунд до суток. Шаг точек выводится из
-  окна: 120 колонок, поэтому окно в 2 минуты — это ровно **одна точка в секунду**.
+**Modpack:** GTNH 2.8.3 — GT5-Unofficial `5.09.51.482`, OpenComputers `1.11.20-GTNH`,
+Computronics `1.9.3-GTNH`.
 
-## Требования
-
-**Мод-сборка:** GTNH 2.8.3 (GT5-Unofficial `5.09.51.482`, OpenComputers `1.11.20-GTNH`,
-Computronics `1.9.3-GTNH`).
-
-**Железо в игре:**
-
-| Компонент | Зачем |
+| Component | Why |
 |---|---|
-| Computer (T2+), Screen, Keyboard | Базовая машина. Клавиатура нужна для ввода имён и координат. |
-| GPU **третьего уровня** | Желателен: даёт двойную буферизацию, без неё интерфейс мерцает. На T2 приложение работает, но кадр рисуется прямо на экран. |
-| **Adapter** | Обязателен: приставляется к контроллеру машины, иначе компонент не появится. Либо MFU в адаптере — тогда до 16 блоков. |
-| Internet Card | Только для установки. |
-| Terminal Glasses Bridge + Glasses | Опционально, для AR-вывода. |
+| Computer (T2+), Screen, Keyboard | The base machine. Keyboard is for typing names and coordinates. |
+| GPU **T3** | Recommended: double buffering, without it the UI flickers. Works on T2, but the frame is drawn straight to screen. |
+| **Adapter** | Required: placed touching the machine's controller block. Or an MFU in an Adapter — up to 16 blocks. |
+| Internet Card | Install only. |
+| Terminal Glasses Bridge + Glasses | Optional, for the AR output. |
 
-Памяти хватает T1.5; при большом количестве буферов ставьте T2.
+## Install
 
-## Установка
-
-В шелле OpenOS:
+In the OpenOS shell:
 
 ```shell
 cd /home
 wget -f https://cdn.jsdelivr.net/gh/happyCat-dev/ARGUS@v2.5.5/setup.lua && setup
 ```
 
-Установщик сам переберёт зеркала, скачает файлы в `/home/ARGUS` и предложит включить
-автозапуск. Версия установленной сборки видна в правом нижнем углу приложения.
+The installer walks the mirrors, downloads the files into `/home/ARGUS`, and offers to enable
+autostart. The installed version is shown in the bottom-right corner of the app. Run manually
+with `cd /home/ARGUS && init`.
 
-> **Ставьте с тега, а не с ветки.** jsDelivr кеширует ссылку на ветку (`@main`) на
-> несколько часов и делает это отдельно по каждому файлу, поэтому `@main` способен
-> отдать файлы из разных коммитов — и все запросы при этом успешны. Теги и SHA
-> коммитов неизменяемы.
+> **Install from a tag, not a branch.** jsDelivr caches `@main` per-file for hours and can
+> hand you files from different commits — with every request reporting success.
 
-Через `raw.githubusercontent.com` — если он у вас доступен из игры (см. ниже):
+If it won't download, or it updated but nothing changed — the causes (TLS handshake abort,
+the OpenOS `require` cache) are broken down in [DETAILS.md](DETAILS.md).
+
+Later updates are done in-app from the **Settings** page:
+
+![Settings page — graph window and in-app updates](docs/settings.png)
+
+## Usage
+
+Control is by mouse over the screen (right-click the monitor in-game). Settings are **not**
+saved automatically — press `Save`. Quit with `Quit` or `Ctrl+C`.
+
+| Page | What it does |
+|---|---|
+| **Dashboard** | Energy panel for the selected source. |
+| **Buffers** | Click — show that buffer. `rename` — custom name. `on/off` — polling. `Rescan components` — re-read components. |
+| **Glasses** | AR-panel settings for the glasses: source, position, size, crafting and stock cards. |
+| **Crafting** | ME network crafts: CPUs, chain of the selected one, stalled jobs. |
+| **Network** | Server/client mode, network key, port, list of connected bases. |
+| **Settings** | Graph window (30 s … a full day, preset or exact seconds) and app updates: auto-check and “Check for updates”. |
+| **Save** | Saves settings to `/home/ARGUS/settings/config`. |
+
+**Buffer states:** `ONLINE` — energy flowing · `IDLE` — available but not moving ·
+`OFF` — work disabled · `PROBLEM` — needs maintenance · `MISSING` — component unavailable.
+
+On **Buffers** you also pick which ME items and fluids to watch beside a buffer:
+
+![Buffers page — buffer list and the ME item/fluid picker](docs/buffers.png)
+
+From the glasses the source can be switched without walking to the computer: `←`/`→` —
+neighbour, `1`…`9` — by number, `C` — cycle. Requires a bound Free Cursor key in
+`Controls → OC Glasses` (unbound by default — otherwise the app looks broken). The **Glasses**
+page configures each pair — source, position, size, and the crafting and stock cards:
+
+![Glasses page — per-pair AR configuration](docs/glasses.png)
+
+## Multiple bases: server and clients
+
+OpenComputers networks **do not merge** — a component is only visible inside its own
+`Network`, and wireless and Linked cards carry messages only. So each remote base runs its
+own ARGUS in `client` mode: it reads its buffers locally and sends **finished numbers** to
+the server, which shows them alongside its own, aggregate included.
+
+- **Wireless Network Card (T2)** — same dimension, up to ~400 blocks.
+- **Linked Card** — another dimension or unlimited range, strictly 1:1.
+- A **network key** separates your bases from everyone else's on a shared server
+  (`modem.broadcast` reaches every modem on the same port). It's an SSID, not a password —
+  for privacy use a Linked Card.
+
+Set it up on the **Network** page of both bases: role, shared key, shared port, base name.
+Full breakdown of the transports and protection is in [DETAILS.md](DETAILS.md).
+
+![Network page — role, port, network key and node name](docs/network.png)
+
+## Applied Energistics crafting and stock
+
+The **Crafting** page and the glasses cards show what your autocraft is doing right now, and
+highlight stalled jobs (two idle thresholds). Stock tracking shows the count of selected
+items and fluids.
+
+Needs an **Adapter** to the **ME Controller** and a **Crafting Monitor** in each CPU (without
+it the final output isn't visible). Works **only on the GTNH build** of OpenComputers —
+upstream reports nothing about a running craft ([issue #3786](https://github.com/MightyPirates/OpenComputers/issues/3786)).
+If the page is empty, `tools/medump.lua` says why.
+
+![Crafting page — CPU list and the selected job's chain](docs/crafting.png)
+
+## Accuracy and internals
+
+The data layer is built against the GT5-Unofficial `5.09.51.482` and Computronics
+`1.9.3-GTNH` sources.
+
+- **Parsed by label, not by index** — an addon inserts a sensor line and index-based parsing
+  yields silently wrong numbers; ARGUS matches on the label and returns `nil` when it's absent.
+- **LSC accuracy** — `getEUStored()` truncates the BigInteger via `longValue()` and lies
+  above 2⁶³ (not fixed in 2.8.3). ARGUS stores the charge as the exact decimal string from
+  the sensor and prints it.
+- **Rate from the charge delta**, not "IN minus OUT" — works even for IC2 storage that
+  reports no throughput, and accounts for passive loss.
+- **String width in characters, not bytes** — `gpu.set` advances by character, so non-ASCII
+  (`●`, `…`) never shifts the layout.
+- **Runs on a GPU T2** — the frame is drawn directly rather than through video-memory
+  buffers, so a T3 is recommended but not required.
+
+## Development
+
+Everything below the renderers is pure Lua and tested outside Minecraft:
 
 ```shell
-wget -f https://raw.githubusercontent.com/happyCat-dev/ARGUS/v2.5.5/setup.lua && setup
+lua tests/run.lua        # checks: sensor parsing, metrics, crafts, stock, formatting
+lua tests/preview.lua [dashboard|buffers|glasses|crafting|network|stock]   # UI to text
 ```
 
-Полезные ключи:
-
-```shell
-setup --repo=user/repo                 # ставить из форка
-setup --mirror=raw                     # заставить конкретное зеркало
-setup --branch=v2.5.5                  # конкретный тег
-setup --branch=<commit-sha>            # точная ревизия
-setup --branch=main                    # неопубликованный код (см. предупреждение выше)
 ```
-
-Запуск вручную:
-
-```shell
-cd /home/ARGUS && init
-```
-
-### Переход с EMON (версии до 2.0.0)
-
-Приложение раньше называлось **EMON** и жило в `/home/EMON`. Установщик 2.0.0 переносит
-всё сам: находит старый каталог, копирует настройки (имена буферов, положение панели),
-перенастраивает автозапуск на новый путь и удаляет `/home/EMON`. Делать вручную ничего
-не нужно.
-
-### Если не качается
-
-**`HTTP request failed: Remote host terminated the handshake`**
-
-Соединение обрывается на этапе TLS-рукопожатия: сервер закрыл TCP сразу после ClientHello.
-Это происходит **до** того, как что-либо скачалось, и не зависит ни от приложения, ни от мода.
-
-Что это сразу исключает:
-
-- **Настройки OpenComputers ни при чём.** Фильтр (`internet.filteringRules`) отрабатывает
-  до открытия сокета и даёт другую ошибку — `address is not allowed`. Раз дошло до TLS,
-  значит DNS отработал, фильтр пропустил и TCP-соединение установилось.
-- **Версия Java ни при чём.** Этот текст ошибки бросает `SSLSocketImpl.handleEOF()` из
-  TLS-стека JDK 11+; на Java 8 сообщение было бы другим — то есть вы уже на новой Java.
-  `-Dhttps.protocols` и подобные аргументы не помогут: рассогласования версий TLS нет,
-  иначе был бы `handshake_failure`, а не обрыв.
-- **Сертификаты ни при чём** — их отсутствие даёт `PKIX path building failed`.
-
-Причина внешняя: путь до конкретного хоста режется. Обходы по надёжности:
-
-1. **Другое зеркало.** `cdn.jsdelivr.net` — другой домен и другая сеть, отдаёт файлы прямо
-   из этого репозитория. Установщик пробует его первым.
-2. **Положить файлы на диск напрямую** — работает всегда, интернет не нужен. Файлы
-   компьютера лежат в сохранении: `saves/<мир>/opencomputers/<адрес-диска>/`. Адрес диска
-   покажет команда `components` в OpenOS. Остановите игру, скопируйте туда содержимое
-   репозитория как `/home/ARGUS`, запустите.
-3. **Своё зеркало** — Codeberg/Gitea/VPS, затем `setup --repo=...` или прямой `wget`.
-
-Не тратьте время на `settings.conf`, переустановку Java и `http://` вместо `https://`:
-на `http://` GitHub отвечает редиректом на `https://`, а OpenComputers использует голый
-`HttpURLConnection`, который по соображениям безопасности не следует редиректу со сменой
-протокола — `wget` просто сохранит заглушку.
-
-**Кеш jsDelivr.** Ссылка вида `@main` кешируется на несколько часов, поэтому сразу после
-пуша можно получить прошлую версию. Для точной ревизии: `setup --branch=<commit-sha>`.
-
-### Обновился, но ничего не изменилось
-
-Симптом: `setup` отчитался `version : 1.2.1`, `ls -l` показывает новые файлы, а приложение
-падает с `attempt to call a nil value` на функции, которая в файле явно есть.
-
-Причина — **кеш `require` в OpenOS**, а не установка. OpenComputers исполняет весь
-компьютер в **одном Lua-стейте**, и OpenOS держит одну таблицу `package` на всю сессию
-(`boot/01_process.lua`), отдельной песочницы на программу нет. В `lib/package.lua`:
-
-```lua
-function require(module)
-  if loaded[module] ~= nil then
-    return loaded[module]      -- из памяти, диск не читается
-```
-
-Модуль остаётся в памяти **до перезагрузки компьютера**. При этом `init.lua` и
-`tools/sensordump.lua` — скрипты, они читаются с диска каждый запуск. Получается смесь:
-точка входа новая, а всё, что она подключает через `require` — из памяти, старое.
-
-Начиная с 1.2.2 обе точки входа сами вычищают свои модули из `package.loaded`, поэтому
-достаточно перезапустить приложение. На более старых версиях — `reboot`.
-
-Установщик **не** трогает `/lib/core/boot.lua` и `/etc/profile.lua` (в отличие от NIDAS —
-там это делалось только ради логотипа на загрузке и ломало систему при сбое установки).
-Автозапуск делается штатно, через `/home/.shrc`.
-
-## Что показывает панель
-
-**Состояние справа вверху:**
-
-| Состояние | Что значит |
-|---|---|
-| **ONLINE** | Энергия течёт — есть приход или расход. |
-| **IDLE** | Буфер доступен, но энергия **не движется**: и `EU IN`, и `EU OUT` равны нулю. Норма для заряженного накопителя, в который никто не тянет. |
-| **OFF** | Работа машины отключена (`isWorkAllowed` = false) — например, выключена мягким молотком или редстоуном. |
-| **PROBLEM** | Требуется обслуживание. |
-| **MISSING** | Компонент недоступен: адаптер убрали, машина сломана, или удалённая база не отвечает. |
-
-**NET** — насколько буфер реально наполняется или пустеет, в EU/t. Считается **по изменению
-заряда**, а не по счётчикам.
-
-**IN / OUT / LOSS** — что показывает сам GregTech.
-
-Это разные вещи, и важно понимать, почему:
-
-> `EU IN` и `EU OUT` считают только то, что прошло **через хатчи**. LSC в беспроводном
-> режиме отдаёт энергию в сеть мимо них — счётчики покажут ноль, хотя буфер теряет сотни
-> миллионов EU. Поэтому источник истины — изменение заряда: оно учитывает всё, куда бы
-> энергия ни ушла. Цена — задержка около двух секунд.
->
-> Если `NET` заметно расходится с `IN − OUT − LOSS`, это **не ошибка**, а информация:
-> энергия движется там, где GregTech её не считает.
-
-**Energy moved** — сколько энергии **всего** прошло за окно, а не средняя скорость:
-
-```
-Energy moved    received        sent            net
- last 5 min     176.9M EU       5.8G EU         -5.6G EU
- last 1 h       2.6G EU         103.7G EU       -101.1G EU
-```
-
-Это отвечает на вопрос «сколько я потратил за час», на который средняя скорость ответить
-не может: час бурной работы, где приход и расход сошлись в ноль, выглядит как час простоя.
-`net` всегда равен `received − sent`.
-
-`received` и `sent` берутся из счётчиков GregTech, поэтому у них та же слепая зона. Прочерк
-означает, что источник эти цифры не сообщает вовсе — так у беспроводной сети и хранилищ
-IC2. Вместо выдуманного нуля честный `--`.
-
-`net` при этом считается по изменению заряда, как и `NET`. Картина вида
-`--  /  --  /  -101G EU` читается ровно так, как есть: «GregTech проход не показывает, но
-заряда ушло вот столько».
-
-## Использование
-
-Управление — мышью по экрану (ПКМ по монитору в игре).
-
-| Страница | Что делает |
-|---|---|
-| **Dashboard** | Панель энергии выбранного источника. |
-| **Buffers** | Клик по строке — показать этот буфер на экране. `rename` — задать своё имя. `on/off` — включить/выключить опрос. `Rescan components` — перечитать компоненты. |
-| **Glasses** | Настройки AR-панели для выбранной пары очков: источник, положение, размер, карточка крафтов. |
-| **Crafting** | Крафты ME-сети: список CPU, разбор цепочки выбранного, зависшие задания. |
-| **Graph** | Перебирает окно графика: 30 сек, 1, 2, 5, 10, 30 мин, 1 час. |
-| **set** | Ввести окно графика в секундах вручную (от 15 секунд до суток). |
-| **Save** | Сохраняет настройки в `/home/ARGUS/settings/config`. |
-
-Настройки **не** сохраняются автоматически — жмите `Save`.
-
-Выход — кнопка `Quit` или `Ctrl+C`.
-
-### Окно графика и шаг точек
-
-График всегда 120 колонок, поэтому **шаг = окно / 120**, и он подписан прямо над
-графиком: `Charge · last 2 min · 1s/pt`.
-
-| Окно | Шаг точек |
-|---|---|
-| 30 сек | 0.25 с (упирается в частоту опроса) |
-| **2 мин** | **1 секунда** |
-| 10 мин | 5 секунд |
-| 1 час | 30 секунд |
-
-Кнопка `Graph` в футере перебирает пресеты, `set` — ввод числом в секундах.
-
-При смене окна график очищается и набирается заново: накопленные точки стоят с прежним
-шагом, и рисовать их по новой оси X означало бы врать о времени.
-
-Память при этом не растёт: колонок всегда 120, поэтому час истории стоит ровно столько же,
-сколько минута.
-
-## Несколько баз: сервер и клиенты
-
-### Сначала главное: сети OpenComputers **не** объединяются
-
-Это не ограничение, которое можно обойти, а устройство мода. Компонент виден только внутри
-своего объекта `Network`, а сети соединяются исключительно через физический контакт блоков.
-Даже **проводной Relay сети не объединяет** — в его документации прямо написано:
-
-> *"...allow different subnetworks to send network messages to each other, **without exposing
-> components to computers in other networks**."*
-
-Беспроводные карты и Linked Card переносят **только сообщения**. Никакой `component.list()`
-на главном компьютере чужие машины не увидит — никогда.
-
-Поэтому ARGUS делает иначе: на каждой базе стоит **свой** ARGUS в режиме `client`, он читает
-свои буферы локально и отправляет **готовые числа** серверу. Сервер показывает их наравне со
-своими — в списке, на панели, в очках, и **в агрегате**.
-
-```
-   База A (сервер)                        База B (клиент)
-   ┌──────────────────┐                   ┌──────────────────┐
-   │ Computer + ARGUS │   сообщения       │ Computer + ARGUS │
-   │ role = server    │◄─── карта ───────►│ role = client    │
-   │ Screen, Glasses  │                   │                  │
-   │        │         │                   │        │         │
-   │     Adapter      │                   │     Adapter      │
-   │        │         │                   │        │         │
-   │       LSC        │                   │  Battery Buffer  │
-   └──────────────────┘                   └──────────────────┘
-        своя сеть                              своя сеть
-```
-
-### Что поставить
-
-**На каждой базе:** Computer с ARGUS, Adapter'ы к буферам (касаясь контроллера), и одна карта
-связи. Экран и очки нужны только там, где вы смотрите — клиенту достаточно корпуса и карты.
-
-**Карта — по геометрии:**
-
-| Ситуация | Карта | Ограничения |
-|---|---|---|
-| Одно измерение, до ~400 блоков | **Wireless Network Card** (T2) в обе базы | T1 — всего 16 блоков. Дальность режется блоками на пути: 400 — это в чистом воздухе, под землёй заметно меньше. **Между измерениями не работает.** |
-| Другое измерение или очень далеко | **Linked Card** — пара, по одной в каждую базу | Безлимитная дальность, работает между мирами. Строго **1:1**: на N баз нужно N карт в сервере. |
-| Далеко, но в одном мире | Wireless + **Relay** как ретрансляторы | Не более **5 переходов**, дальше пакет отбрасывается. |
-
-Linked Card крафтится **парой** — обе карты из одного крафта связаны между собой, разные пары
-не пересекаются.
-
-> Провод между базами тоже возможен и тогда сети реально сольются, а компоненты станут видны
-> напрямую (режим `server` не нужен). Но на дистанции это непрактично, и список компонентов
-> главного компьютера превратится в свалку — ради этого разделение и придумано.
-
-### Настройка
-
-На обеих базах: страница **Network**.
-
-1. **Role** — `server` там, где смотрите; `client` на удалённой базе.
-2. **Network key** — на сервере он уже сгенерирован; **перепишите его на каждый клиент**.
-   Без совпадения ключа базы друг друга не увидят (и это же защищает от чужих — см. ниже).
-3. **Port** — любой, но **одинаковый везде**. Модем молча выбрасывает сообщения на не
-   открытый порт, поэтому расхождение выглядит как «клиентов нет».
-4. **This node** — имя базы: с ним её буферы появятся у сервера (`Шахта · LSC`).
-5. **Poll** и **timeout** (только сервер): как часто опрашивать и через сколько секунд тишины
-   считать базу отключённой.
-6. **Save** на обеих. Смена роли применяется сразу, перезапуск не нужен.
-
-### Если на сервере не вы один
-
-Это **обязательно к прочтению для мультиплеера.** `modem.broadcast` — это широковещание: его
-получит **любой** модем в радиусе, открывший тот же порт. Порт по умолчанию у всех
-одинаковый. Значит без защиты:
-
-- ARGUS-сервер соседа опросил бы **ваши** клиенты, и ваши буферы появились бы у него;
-- ваш сервер собрал бы **чужие** базы к себе в список и в агрегат.
-
-Разделяет базы **Network key**. Каждое сообщение несёт его, и всё, что пришло с чужим
-ключом, отбрасывается — в обе стороны. По умолчанию ключ выводится из адреса вашего
-компьютера: уникален, стабилен между перезагрузками, случайно совпасть не может.
-
-> **Ключ — это SSID, а не пароль.** Он избавляет от пересечений, но не от подслушивания:
-> сообщения идут открытым текстом, и кто угодно в радиусе, зная ключ, сможет
-> подключиться. В OpenComputers нет шифрования «из коробки». Если данные должны быть
-> закрыты — используйте **Linked Card**: связь строго точка-точка, принять её физически
-> некому, кроме парной карты.
-
-Практический совет для общего сервера: возьмите свой ключ и **смените порт** на нетипичный —
-тогда чужие модемы даже не будут его открывать, и лишнего трафика не будет вовсе.
-
-Готово: на сервере в разделе **Clients** появятся подключённые базы — имя, адрес, число
-буферов, статус, расстояние и когда отвечали в последний раз. Их буферы окажутся на странице
-**Buffers** вместе с локальными.
-
-### Если клиентов не видно
-
-- **Ключ разный.** Самая частая причина: он у каждого компьютера свой по умолчанию, и на
-  клиенте его нужно заменить на серверный.
-- **Порт разный.**
-- **Роли не те** — на удалённой базе должен быть именно `client`, а не `standalone`.
-- **Нет карты** — страница Network показывает, сколько карт найдено; при нуле там висит
-  предупреждение.
-- **Не добивает** — беспроводная связь глушится блоками. Проверьте расстояние (`Clients`
-  показывает его), поднимите ретранслятор или переходите на Linked Card.
-- **Разные измерения** — беспроводная карта туда не работает **вообще**. Только Linked Card.
-- **База показана `OFFLINE`** — связь была и пропала. Её буферы помечаются как `MISSING` и
-  выпадают из агрегата: показывать последние известные числа как актуальные было бы враньём.
-
-Клиенту экран не обязателен, но с ним удобно: он видит свои буферы сам, независимо от сервера.
-
-### Свои имена буферов
-
-На странице **Buffers** кнопка `rename` рядом с буфером — вводите имя, `Enter` подтверждает,
-`Esc` отменяет. Имя используется **везде**: заголовок на мониторе, список, AR-панель,
-подпись беспроводной сети (`Моё имя · Wireless`).
-
-Имя переживает `Rescan components`: приложение хранит его отдельно от того, как машина
-называет себя сама. Пустое имя возвращает исходное название машины.
-
-### Положение AR-панели
-
-На странице **Glasses**, строка `Position`:
-
-- **Шесть углов** — `top-left`, `top-center`, `top-right`, `bottom-left`, `bottom-center`,
-  `bottom-right`. Панель прижимается к выбранному углу, а `X`/`Y` смещают её оттуда.
-- **`manual`** — `X`/`Y` становятся **точными координатами** в системе координат очков,
-  левый верхний угол = `0, 0`.
-
-Задать числа можно двумя способами: стрелками `← → ↑ ↓` по 4 пикселя, либо кликнуть по
-кнопке `X` / `Y` и **ввести значение с клавиатуры**.
-
-Размер области очков виден в строке `Card` (`detected 640x360`) — от него и считайте
-координаты для `manual`.
-
-### Переключение источника прямо из очков
-
-Источник можно менять не подходя к компьютеру — очки умеют принимать ввод.
-
-> ### Шаг 1: назначьте клавишу — без неё ничего не работает
->
-> `Настройки` → `Управление` → пролистать до раздела **«OC Glasses»**. Там два пункта:
->
-> * **Free Cursor (Toggle)** — нажал, курсор появился; нажал ещё раз (или `Esc`) — исчез.
-> * **Free Cursor (Hold)** — курсор есть, пока клавиша зажата.
->
-> **Обе по умолчанию НЕ назначены** — в коде мода стоит `new KeyBinding(..., 0, ...)`,
-> где `0` означает «клавиши нет». Именно поэтому курсор появляется только при открытии
-> чата: своей клавиши у оверлея пока нет. Назначьте любую свободную (например `G`).
->
-> Это ограничение мода OCGlasses, а не приложения: вне этого оверлея мод вообще не шлёт
-> компьютеру ни кликов, ни нажатий клавиш. Очки при этом должны быть надеты.
-
-Нажимаете назначенную клавишу — появляется курсор. Дальше:
-
-| Действие | Что делает |
-|---|---|
-| **←** / **→** | Предыдущий / следующий источник |
-| **1**…**9** | Выбрать источник по номеру из списка Buffers |
-| **C** | Включить/выключить циклический перебор (`⟳` рядом с названием) |
-| Клик по **‹** / **›** на панели | То же, что ← / → |
-| Клик по названию источника | То же, что C |
-| **Esc** | Закрыть курсор |
-
-Мышь не обязательна: при открытом курсоре достаточно стрелок и цифр — клики по `‹ ›`
-нужны только если так удобнее. Быстрый сценарий: `G` → `→` → `Esc`.
-
-Работает из любой точки мира — привязка к компьютеру не нужна, важно лишь чтобы очки
-были связаны с Glasses Terminal, а тот — с компьютером.
-
-Технически это сигналы `hud_click`, `hud_keyboard` и `glasses_on` от мода OCGlasses
-(1.6.1-GTNH). Интерактивных виджетов мод не предоставляет, поэтому кнопки нарисованы
-вручную, а попадание проверяется в коде.
-
-**Размер панели определяется автоматически.** Сигнал `glasses_on` сообщает реальное
-разрешение интерфейса игрока, поэтому GUI scale вручную выставлять не нужно — и именно
-благодаря этому клики попадают в кнопки. Если что-то не так, на странице Glasses можно
-переключить `auto size` → `manual` и задать масштаб самому.
-
-## Крафты Applied Energistics
-
-Страница **Crafting** на мониторе и отдельная карточка в очках показывают, что автокрафт
-делает прямо сейчас: какой предмет заказан в итоге, что уже в машинах, что ещё ждёт, и не
-встало ли всё.
-
-### Что нужно в игре
-
-| Что | Зачем |
-|---|---|
-| **Adapter** к **ME Controller** (или ME Interface) | Через него виден весь ME-компонент. Как и с GregTech: адаптер должен физически касаться блока. |
-| **Crafting Monitor** в сборке каждого CPU | **Без него не будет видно, что заказано.** Драйвер читает итоговый предмет с блока `TileCraftingMonitorTile` внутри кластера CPU — программного запасного пути нет. Цепочка при этом читается нормально, неизвестен только итог. |
-
-Приложение само найдёт компонент — настраивать ничего не надо. Если страница пуста,
-`tools/medump.lua` скажет, чего не хватает.
-
-### Это работает только на GTNH-сборке OpenComputers
-
-Апстримный OpenComputers про запущенный крафт не сообщает **ничего**: у него есть только
-`isDone()` на объекте, который вы сами создали через `request()` — см. открытый
-[issue #3786](https://github.com/MightyPirates/OpenComputers/issues/3786). Вся эта страница
-существует благодаря тому, что форк GTNH (`1.11.20-GTNH`) добавил в `NetworkControl.scala`
-значение `Cpu` с методами `activeItems`, `pendingItems`, `storedItems` и `finalOutput`.
-
-На сборке со стоковым OpenComputers функция просто не заработает, и `tools/medump.lua`
-напишет об этом прямо.
-
-### Управление
-
-| Действие | Что делает |
-|---|---|
-| Клик по строке CPU на мониторе | Разобрать его цепочку ниже |
-| **[** / **]** в очках | Листать список карточки |
-| **F** в очках | Показывать только зависшие задания |
-| Клик по заголовку карточки | То же, что F |
-| Клик по **‹** / **›** на карточке | То же, что [ и ] |
-
-Клавиши намеренно отдельные от энергетических: **← → и 1-9 по-прежнему переключают
-буфер**, так что привычки не ломаются. Карточка крафтов включается на странице **Glasses**,
-строка `Craft card`, и живёт независимо от энергетической — можно носить любую из двух,
-обе или ни одной.
-
-### Чего AE2 не сообщает — и что из-за этого выведено, а не прочитано
-
-**Порядка в цепочке нет.** Задание в AE2 — это дерево параллельных подзадач, а не очередь;
-`pendingItems` отдаёт **множество**. Поэтому «ожидает» сортируется по количеству, а не по
-очерёдности, и приложение об этом честно пишет прямо на странице. Обещать «следующим будет
-ровно это» было бы враньём.
-
-**Признака остановки тоже нет** — никакого `isStalled()`. Он выводится из того, что
-показания перестали меняться:
-
-| Ситуация | Порог | Почему такой |
-|---|---|---|
-| Занят, но ничего не изменилось | **120 сек** | Один рецепт GregTech спокойно идёт минутами. Меньший порог кричал бы «волки» на каждой большой машине. |
-| Занят, работа ждёт, но **в машинах пусто** | **15 сек** | Это не «медленно», а «стоит»: нет ингредиента, сломан паттерн, некому взять рецепт. Здорового чтения такой формы почти не бывает, поэтому срабатывает быстро. |
-
-Оба порога меняются в `settings/config` (`craft.stallSeconds`, `craft.emptyStallSeconds`).
-Там же `craft.enabled = false` выключает опрос целиком, а `craft.pollInterval` (по
-умолчанию 2 сек) задаёт его частоту — опрос дороже энергетического: `getCpus()` плюс до
-четырёх вызовов на каждый **занятый** CPU (незанятые не читаются вовсе).
-
-## Диагностика
-
-Если цифры выглядят неправильно:
-
-```shell
-cd /home/ARGUS && tools/sensordump.lua
-```
-
-Выведет для каждого энергокомпонента: тип, все структурные геттеры, сырые строки
-`getSensorInformation()` с индексами и то, что ARGUS из них распарсил. Формат строк
-GregTech зависит от версии и аддонов — этого вывода достаточно, чтобы починить парсинг.
-
-Если пуста страница **Crafting**:
-
-```shell
-cd /home/ARGUS && tools/medump.lua
-```
-
-Выведет все компоненты, все CPU сети, наличие каждого метода по отдельности, сырые списки
-предметов и то, что ARGUS из них вывел. Различает три причины пустоты: компонента нет
-вовсе, драйвер без нужных методов (стоковый OpenComputers), CPU без Crafting Monitor.
-
-## Чем отличается от NIDAS
-
-Это не косметический форк — слой данных переписан. Основания разбирались по исходникам
-GT5-Unofficial `5.09.51.482` и Computronics `1.9.3-GTNH`, то есть по версиям, которые
-реально входят в GTNH 2.8.3.
-
-**Парсинг по лейблам, а не по индексам.** NIDAS берёт `sensorInformation[2]`, `[5]`, `[23]`
-и выбирает раскладку по эвристике «сколько строк вернулось». Стоит аддону вставить строку —
-и вместо ошибки получаются молча неверные числа. ARGUS ищет строку по лейблу
-(`^EU Stored`, `Passive Loss`), а при отсутствии возвращает `nil`.
-
-**Точность.** У LSC заряд хранится как `BigInteger`, но
-`MTELapotronicSuperCapacitor.getEUVar()` возвращает `stored.longValue()` — а
-`BigInteger.longValue()` **обрезает**, а не ограничивает. Поэтому выше 2^63 `getEUStored()`
-врёт (починено только в GTNH 2.9 отдельным компонентом `LSC`, которого в 2.8.3 нет). Кроме
-того, числа в Lua — это `double`, и выше 2^53 (≈9·10¹⁵) точное значение уже не представимо.
-ARGUS хранит заряд и числом (для математики), и **точной десятичной строкой** из сенсора —
-и печатает именно строку.
-
-**Структурные геттеры вместо строк там, где можно.** Скорости берутся из
-`getEUInputAverage()` / `getEUOutputAverage()`. Средние за 5 минут и час GregTech считает
-сам — ARGUS использует их, а не пересчитывает по тик-счётчику, как NIDAS.
-
-**Скорость измеряется по изменению заряда**, а не как «IN минус OUT»: так работает даже для
-IC2-хранилищ, которые вообще не сообщают проход энергии, и автоматически учитываются
-пассивные потери.
-
-**Исправленные баги NIDAS**, которые унаследовались бы при простом форке:
-
-- Battery Buffer в NIDAS не определялся никогда: `component.list()[address]` вызывается
-  с сокращённым адресом, а таблица ключуется полным UUID → всегда `nil`.
-- Состояния машин — таблицы, сравниваемые по ссылке (`==`); после сериализации сравнение
-  тихо ломается. В ARGUS это строки.
-- `parser.getInteger` терял знак; `splitNumber(0)` давал `nan`; `metricNumber(1000)`
-  показывал `1000.0k` вместо `1.0M`.
-- Ширина строк считалась в байтах (`#text`), хотя `gpu.set` двигается по символам —
-  любой не-ASCII символ (`●`, `…`) смещал вёрстку.
-
-**Требования к железу ниже.** NIDAS рендерит через буферы видеопамяти
-(`gpu.allocateBuffer`) — это GPU третьего уровня. ARGUS рисует напрямую, хватает T2.
-
-## Разработка
-
-Вся логика ниже рендереров — чистый Lua и тестируется вне Minecraft:
-
-```shell
-lua tests/run.lua        # 419 проверок: парсинг сенсоров, метрики, крафты, форматирование
-lua tests/preview.lua [dashboard|buffers|glasses|crafting|network]   # UI в текст через фейковый GPU
-```
-
-Фикстуры в `tests/run.lua` воспроизводят реальный вывод LSC в GTNH 2.8.3 — 24 строки,
-с §-кодами цвета и парами «с разделителями / научная нотация». Фикстуры ME воспроизводят
-формы из `NetworkControl.scala`, включая **дырки** в списках предметов: драйверный
-`convert()` возвращает `null` для нераспознанного стека, и в Lua это дырка в массиве.
-
-### Структура
-
-```
-init.lua              точка входа и главный цикл
-setup.lua             установщик
-config/               загрузка и сохранение настроек
+init.lua              entry point and main loop
+setup.lua             installer
+config/               loading and saving settings
 core/
-  sensor.lua          разбор getSensorInformation() по лейблам
-  sources/            адаптеры буферов (lsc, batterybuffer, ic2, energycontainer)
-  monitor.lua         опрос, агрегация, виртуальные wireless-представления
-  craft.lua           опрос CPU ME-сети, вывод цепочки и остановок
-  metrics.lua         скорости, средние, прогноз времени
-  ring.lua            кольцевой буфер истории
-lib/graphics/         ar.lua (очки), graphics.lua (GPU), colors.lua
+  sensor.lua          parse getSensorInformation() by label
+  sources/            buffer adapters (lsc, batterybuffer, ic2, energycontainer)
+  monitor.lua         polling, aggregation, virtual wireless views
+  craft.lua           ME network CPU polling, chain and stall output
+  stock.lua           tracking item and fluid counts in the ME network
+  metrics.lua         rates, averages, time forecast
+  states.lua          buffer statuses (ONLINE / IDLE / OFF / …)
+  ring.lua            ring buffer for history
+  update.lua          check and install a new version via jsDelivr → setup.lua
+lib/graphics/         ar.lua (glasses), graphics.lua (GPU), colors.lua
 lib/utils/            parser, screen, text, time
-ui/                   экранный интерфейс: panel, graph, widgets, app
-ar/                   AR-интерфейс: panel (энергия), craft (крафты), менеджер очков
-net/                  распределённый режим: транспорт, сервер, клиент
-tools/sensordump.lua  диагностика энергокомпонентов
-tools/medump.lua      диагностика ME-сети
+ui/                   screen interface: panel, graph, widgets, app, format
+ar/                   AR interface: panel (energy), craft, stock, glasses manager
+net/                  distributed mode: transport, server, client
+tools/sensordump.lua  energy-component diagnostics
+tools/medump.lua      ME-network diagnostics
 ```
 
-Чтобы добавить новый тип буфера, положите модуль в `core/sources/` с полями
-`kind`, `label`, `componentTypes`, функциями `detect(proxy, lines, componentType)`
-(возвращает уверенность, 0 — «не моё») и `read(proxy, lines)`, и зарегистрируйте его
-в списке `adapters` в `core/sources/init.lua`.
+New buffer type: a module in `core/sources/` with fields `kind`, `label`, `componentTypes`,
+functions `detect(proxy, lines, componentType)` (returns confidence, 0 = "not mine") and
+`read(proxy, lines)`; register it in `adapters` in `core/sources/init.lua`.
 
-## Лицензия
+## License
 
-**GPL-3.0**, унаследована от NIDAS. См. [LICENSE.md](LICENSE.md) и [NOTICE.md](NOTICE.md).
+**GPL-3.0**. See [LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md) for full terms and provenance.

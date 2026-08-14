@@ -23,7 +23,7 @@ NIDAS распространяется под **GNU General Public License v3.0*
 
 Логика чтения LSC в `core/sources/lsc.lua` вдохновлена `server/usecases/get-lsc-status.lua`
 из NIDAS, но переписана полностью: NIDAS парсит строки сенсора по захардкоженным индексам,
-ARGUS сопоставляет по лейблам. См. раздел «Чем отличается от NIDAS» в [README.md](README.md).
+ARGUS сопоставляет по лейблам. См. раздел «Точность и внутренности» в [README.ru.md](README.ru.md).
 
 ## Что из NIDAS удалено
 
