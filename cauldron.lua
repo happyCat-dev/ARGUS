@@ -253,7 +253,7 @@ local cfg = {
   --              ингредиент идёт ПОДРЯД (повторы вразбивку буфер не сохраняет — сундук
   --              стакает одинаковые предметы в один слот). Завершение отслеживает AE2.
   --   "recipe" — порядок берётся из таблицы recipes ниже, очередь и детект ведёт OC.
-  mode = "buffer",
+  mode = "recipe",
 
   -- Адреса компонентов. nil = взять первый найденный этого типа.
   transposer = "34eeb223-0237-4a3f-ae57-37279b686007",  -- основной, у дроппера/сундука
@@ -285,7 +285,7 @@ local cfg = {
   --   "me"    — опрашивать количество продукта в ME-сети (нужен компонент me_interface/me_controller)
   --   "chest" — опрашивать вакуум-сундук через cfg.output.address
   --   "timer" — просто ждать фиксированное время (ненадёжно, но без сети)
-  detect      = "me",
+  detect      = "chest",
   brewTimeout = 60,   -- сек: потолок ожидания продукта, дальше — ошибка
   timerBrew   = 8,    -- сек: пауза для detect="timer"
 
@@ -318,32 +318,29 @@ local cfg = {
 --
 -- Имя сверяется по cfg.matchBy: "label" (отображаемое) или "name" (реестровый id).
 
+-- Рецепты котла Witchery/WitcheryExtras (GTNH 2.8.3). Имена — как в NEI (matchBy="label").
+-- Порядок — из NEI. Кол-во каждого принято ПО 1 (в списках не было цифр) — если в NEI
+-- на ингредиенте стоит число >1, поправить count/повтор.
 local recipes = {
 
-  -- Компактный формат. Длинная последовательность с повторами того же ингредиента
-  -- в разных местах очереди — ровно то, что нужно для многосоставных рецептов.
-  ["demon_brew"] = {
-    product = { label = "Demon Heart", count = 1 },
-    order = {
-      "Mandrake Root",              -- 1
-      "Wood Ash",                   -- 2
-      { "Wood Ash", 2 },            -- 3-4: ещё 2 подряд
-      "Water Artichoke Globule",    -- 5
-      "Redstone",                   -- 6
-      "Mandrake Root",              -- 7: снова, позже по очереди
-      { "Glowstone Dust", 3 },      -- 8-10
-      "Nether Star",                -- 11
-    },
+  ["golden_chalk"] = {
+    product = { label = "Golden Chalk", count = 1 },
+    order = { "Mandrake Root", "Gold Dust", "Diamond Vapor", "Ritual Chalk" },
   },
 
-  -- Подробный формат — то же самое, но таблицами.
-  ["mandrake_brew"] = {
-    product = { label = "Mandrake Brew", count = 1 },
-    steps = {
-      { label = "Mandrake Root",           count = 1 },
-      { label = "Wood Ash",                count = 2 },
-      { label = "Water Artichoke Globule", count = 1 },
-    },
+  ["otherwhere_chalk"] = {
+    product = { label = "Otherwhere Chalk", count = 1 },
+    order = { "Endereye Dust", "End Powder", "Tear of the Goddess", "Manyullyn Crystal", "Ritual Chalk" },
+  },
+
+  ["infernal_chalk"] = {
+    product = { label = "Infernal Chalk", count = 1 },
+    order = { "Nether Wart", "Blaze Rod", "Nether Star", "Ritual Chalk" },
+  },
+
+  ["steak"] = {
+    product = { label = "Steak", count = 1 },
+    order = { "Raw Beef" },
   },
 }
 
@@ -352,7 +349,7 @@ local recipes = {
 --==========================================================================--
 -- { "имя_рецепта", сколько_раз }
 local queue = {
-  { "mandrake_brew", 100 },
+  { "steak", 10 },
 }
 
 --==========================================================================--
@@ -514,6 +511,24 @@ local function injectStep(step)
   for _ = 1, step.count do injectOne(step) end
 end
 
+-- Переложить весь продукт из вакуум-сундука в ME. Нужен transposer (у Adapter нет
+-- transferItem — методы прокси это вызываемые таблицы, проверяем на nil, а не на "function").
+local function moveToME()
+  if not cfg.output.toME or not cfg.output.address then return end
+  local p = outProxy()
+  if not p.transferItem then
+    ui.log(IC.err, COL.red, "перекладка в ME: у cfg.output нет transferItem — нужен transposer, не Adapter")
+    return
+  end
+  local src, me = cfg.output.chestSide, cfg.output.meSide
+  local n, moved = p.getInventorySize(src) or 0, 0
+  for s = 1, n do
+    local st = p.getStackInSlot(src, s)
+    if st then moved = moved + (p.transferItem(src, me, st.size, s) or 0) end
+  end
+  if moved > 0 then ui.log(IC.info, COL.cyan, ("переложено в ME: %d"):format(moved)) end
+end
+
 -- долив воды [ПРОВЕРИТЬ: нужен ли он вообще] ---------------------------------
 local function refillWater()
   if not cfg.side.water then return end
@@ -533,6 +548,7 @@ local function brewOnce(recipe, tag)
   end
   ui.boil(false)                        -- вброс окончен, ждём продукт
   waitForProduct(recipe, tag)
+  moveToME()                            -- переложить продукт из вакуум-сундука в ME
 end
 
 -- буфер-режим: порядок из слотов буфера --------------------------------------
@@ -616,24 +632,6 @@ local function outputTotal()
     if st then total = total + (st.size or 0) end
   end
   return total
-end
-
--- Переложить весь продукт из вакуум-сундука в ME. Нужен transposer (у Adapter нет
--- transferItem — методы прокси это вызываемые таблицы, проверяем на nil, а не на "function").
-local function moveToME()
-  if not cfg.output.toME or not cfg.output.address then return end
-  local p = outProxy()
-  if not p.transferItem then
-    ui.log(IC.err, COL.red, "перекладка в ME: у cfg.output нет transferItem — нужен transposer, не Adapter")
-    return
-  end
-  local src, me = cfg.output.chestSide, cfg.output.meSide
-  local n, moved = p.getInventorySize(src) or 0, 0
-  for s = 1, n do
-    local st = p.getStackInSlot(src, s)
-    if st then moved = moved + (p.transferItem(src, me, st.size, s) or 0) end
-  end
-  if moved > 0 then ui.log(IC.info, COL.cyan, ("переложено в ME: %d"):format(moved)) end
 end
 
 -- Ждём, пока в вакуум-сундуке прибавится (продукт готов). Возвращает false при
