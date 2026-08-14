@@ -2,28 +2,29 @@
 -- Отдельная самостоятельная утилита, НЕ часть ARGUS: запускается сама по себе.
 -- Лицензия проекта — GPL-3.0.
 --
--- Что делает:
---   1. Берёт из склада/буфера ингредиенты и вбрасывает их в котёл СТРОГО ПО ПОРЯДКУ
---      (один одиночный дроппер: transposer кладёт 1 предмет -> редстоун-импульс -> роняет).
---   2. Ждёт появления продукта (детект по ME-сети / по сундуку / по таймеру).
---   3. Повторяет для всей очереди. "По одному" получается само: следующая партия
---      начинается только после появления результата предыдущей.
+-- Единственный режим — ЗАКАЗ ИЗ AE (по требованию):
+--   1. Ждёт, пока AE положит ингредиенты в буфер-сундук (ты заказал крафт в ME).
+--   2. Распознаёт по составу буфера ОДИН полный рецепт и роняет РОВНО ОДНУ его порцию
+--      в котёл СТРОГО ПО ПОРЯДКУ (transposer кладёт 1 предмет -> редстоун-импульс -> роняет).
+--   3. Ждёт продукт в вакуум-сундуке EnderIO -> перекладывает его в ME.
+--   4. Повторяет. Смесь из нескольких заказов разбирается по одной варке за раз;
+--      размер порции задаёт РЕЦЕПТ (не AE) -> перекорма нет. Неполный остаток не роняется.
 --
 -- Порядок вброса детерминирован, потому что в дроппере в каждый момент лежит РОВНО
 -- один тип предмета — случайность слота дроппера роли не играет.
 --
 -- ┌─ Подключение (см. схему в чате) ─────────────────────────────────────────┐
 -- │  Dropper смотрит ВНИЗ, стоит над котлом — роняет предмет-сущность в воду.  │
--- │  Transposer касается склада/буфера И дроппера (возит по 1 предмету).       │
+-- │  Основной transposer касается буфер-сундука И дроппера (возит по 1).       │
 -- │  Redstone I/O даёт импульс на дроппер (1 предмет за импульс).              │
--- │  Продукт всплывает над водой -> Annihilation Plane -> ME-сеть.            │
--- │  OC-компьютер по кабелю связан с transposer, redstone и (адаптером) с ME.  │
+-- │  ME Interface кладёт заказанные ингредиенты в буфер-сундук.                │
+-- │  Продукт всплывает над водой -> вакуум-сундук EnderIO; отдельный transposer│
+-- │  у него читает продукт и перекладывает в ME (cfg.output).                  │
 -- └───────────────────────────────────────────────────────────────────────────┘
 --
 -- ВНИМАНИЕ — два узла нельзя проверить без игры, они помечены [ПРОВЕРИТЬ]:
 --   * расходует ли котёл воду за варку (нужен ли долив) — cfg.side.water;
---   * чистый сбор всплывшего продукта (плоскость не должна утащить ингредиенты,
---     пока они ещё реагируют) — вопрос расстановки, не кода.
+--   * чистый сбор всплывшего продукта вакуум-сундуком (радиус, вайтлист) — расстановка.
 
 local component = require("component")
 local sides     = require("sides")
@@ -247,14 +248,6 @@ local droppedTotal = 0   -- всего уронено предметов (для
 --==========================================================================--
 
 local cfg = {
-  -- Режим работы:
-  --   "buffer" — порядок вброса читается ПРЯМО ИЗ БУФЕРА (слоты = порядок паттерна AE2).
-  --              Конфиг рецептов НЕ нужен. Годится, только если в рецепте каждый
-  --              ингредиент идёт ПОДРЯД (повторы вразбивку буфер не сохраняет — сундук
-  --              стакает одинаковые предметы в один слот). Завершение отслеживает AE2.
-  --   "recipe" — порядок берётся из таблицы recipes ниже, очередь и детект ведёт OC.
-  mode = "recipe",
-
   -- Адреса компонентов. nil = взять первый найденный этого типа.
   transposer = "34eeb223-0237-4a3f-ae57-37279b686007",  -- основной, у дроппера/сундука
   redstone   = "f587a0ff-5f5c-439f-9393-594c55d54c6e",  -- Redstone I/O сверху дроппера
@@ -281,21 +274,14 @@ local cfg = {
     meSide    = sides.bottom, -- ME Interface СНИЗУ
   },
 
-  -- Как понять, что варка завершилась (только для mode="recipe"):
-  --   "me"    — опрашивать количество продукта в ME-сети (нужен компонент me_interface/me_controller)
-  --   "chest" — опрашивать вакуум-сундук через cfg.output.address
-  --   "timer" — просто ждать фиксированное время (ненадёжно, но без сети)
-  detect      = "chest",
-  brewTimeout = 60,   -- сек: потолок ожидания продукта, дальше — ошибка
-  timerBrew   = 8,    -- сек: пауза для detect="timer"
+  brewTimeout = 60,   -- сек: потолок ожидания продукта в вакуум-сундуке
 
   -- Тайминги вброса (подобрать под котёл).
   settle = 0.8,       -- пауза после каждого вброса, чтобы котёл "увидел" сущность
   pulse  = 0.1,       -- длительность редстоун-импульса
 
-  -- Только для mode="buffer":
-  stable     = 0.5,   -- пауза для проверки, что интерфейс дозаложил весь набор
-  idleNotice = 30,    -- каждые N сек печатать "жду набор из AE"; 0 = молчать
+  stable     = 0.5,   -- пауза для проверки, что AE дозаложил ингредиенты в буфер
+  idleNotice = 30,    -- каждые N сек печатать "жду заказ"; 0 = молчать
 
   -- По какому полю сверять предметы: "label" (отображаемое имя) или "name" (реестровый id).
   -- "name" надёжнее (не зависит от локализации), но нужно знать точный id, напр. "witchery:mandrakeroot".
@@ -306,8 +292,8 @@ local cfg = {
 --                                РЕЦЕПТЫ                                      --
 --==========================================================================--
 -- Каждый рецепт — СТРОГО упорядоченный список вброса. Длина любая, повторы можно.
--- Очередь берётся ТОЛЬКО отсюда: склад и AE2 — неупорядоченные "мешки" предметов.
--- product — что и сколько появляется на выходе (для детекта готовности).
+-- По этим рецептам скрипт РАСПОЗНАЁТ заказ в буфере (по составу) и роняет одну порцию.
+-- product — что и сколько появляется на выходе (для детекта готовности в вакуум-сундуке).
 --
 -- Записать порядок можно двумя способами (нормализуются одинаково):
 --
@@ -345,19 +331,11 @@ local recipes = {
 }
 
 --==========================================================================--
---                                 ОЧЕРЕДЬ                                     --
---==========================================================================--
--- { "имя_рецепта", сколько_раз }
-local queue = {
-  { "steak", 10 },
-}
-
---==========================================================================--
 --                                  ДВИЖОК                                     --
 --==========================================================================--
 
 -- ленивое разрешение компонентов -------------------------------------------
-local _t, _r, _me
+local _t, _r
 local function transposer()
   if _t then return _t end
   local addr = cfg.transposer or component.list("transposer")()
@@ -370,13 +348,6 @@ local function redstone()
   local addr = cfg.redstone or component.list("redstone")()
   assert(addr, "не найден компонент redstone (Redstone I/O или карта)")
   _r = component.proxy(addr); return _r
-end
-
-local function meNet()
-  if _me then return _me end
-  local addr = component.list("me_interface")() or component.list("me_controller")()
-  assert(addr, "не найден компонент ME (me_interface / me_controller через адаптер)")
-  _me = component.proxy(addr); return _me
 end
 
 -- компонент у вакуум-сундука (адаптер/transposer), задаётся по адресу
@@ -418,18 +389,7 @@ local function itemMatches(stack, spec)
   return stack.label == (spec.label or spec.name)
 end
 
--- подсчёт продукта -----------------------------------------------------------
-local function meCount(spec)
-  -- фильтр по реестровому имени, если оно есть (лёгкий запрос); иначе весь список.
-  local filter = spec.name and { name = spec.name } or nil
-  local list = meNet().getItemsInNetwork(filter)
-  local total = 0
-  for _, st in pairs(list or {}) do        -- pairs: список ME бывает с дырками
-    if itemMatches(st, spec) then total = total + (st.size or 0) end
-  end
-  return total
-end
-
+-- подсчёт продукта в вакуум-сундуке (по спецификации) ------------------------
 local function chestCount(spec)
   local p    = outProxy()
   local side = cfg.output.chestSide
@@ -442,24 +402,14 @@ local function chestCount(spec)
   return total
 end
 
-local function productCount(spec)
-  if cfg.detect == "me"    then return meCount(spec)    end
-  if cfg.detect == "chest" then return chestCount(spec) end
-  return 0
-end
-
--- ожидание готовности --------------------------------------------------------
+-- ждём появления продукта в вакуум-сундуке -----------------------------------
 local function waitForProduct(recipe, tag)
-  if cfg.detect == "timer" then
-    os.sleep(cfg.timerBrew)
-    return
-  end
   local spec = recipe.product
-  local base = productCount(spec)
+  local base = chestCount(spec)
   local deadline = computer.uptime() + cfg.brewTimeout
   while computer.uptime() < deadline do
     os.sleep(1)
-    if productCount(spec) >= base + spec.count then return end
+    if chestCount(spec) >= base + spec.count then return end
   end
   error(("таймаут: продукт '%s' не появился за %d сек (%s)")
     :format(spec.label or spec.name, cfg.brewTimeout, tag))
@@ -598,117 +548,106 @@ local function waitStableBatch()
   end
 end
 
--- Роняем набор строго по порядку слотов; count берём из размера стека в слоте.
-local function dropBatch(snap)
-  local total, k = 0, 0
-  for _, it in ipairs(snap) do total = total + it.size end
-  ui.boil(true)                       -- кипит во время вброса
-  for _, it in ipairs(snap) do
-    local name = it.label or it.name
-    for _ = 1, it.size do
-      local moved = transposer().transferItem(cfg.side.stock, cfg.side.dropper, 1, it.slot, 1)
-      assert(moved and moved >= 1, "не удалось взять из буфера слот " .. it.slot .. " (" .. name .. ")")
-      firePulse(cfg.side.pulse)
-      os.sleep(cfg.settle)
-      assert(dropperEmpty(), "дроппер не выбросил '" .. name .. "' — проверь редстоун и сторону pulse")
-      k, droppedTotal = k + 1, droppedTotal + 1
-      ui.tick()                       -- кадр анимации на каждый вброс
-      ui.log(IC.drop, COL.green, ("уронил %s  (%d/%d)"):format(name, k, total))
-      ui.stat("Уронил всего", tostring(droppedTotal))
-    end
-  end
-  ui.boil(false)                        -- набор вброшен — кипение стихает
+-- auto-режим: заказ из AE, распознать рецепт по буферу, ронять по одной порции ---
+-- ключ предмета по matchBy (у Witchery/GT метадата при общем name — различаем лейблом)
+local function keyOfStack(st) return (cfg.matchBy == "name") and st.name or st.label end
+local function keyOfSpec(sp)
+  if cfg.matchBy == "name" then return sp.name or sp.label end
+  return sp.label or sp.name
 end
 
--- Всего предметов в вакуум-сундуке EnderIO (выход). Считаем ВСЁ: в него падают
--- только продукты котла, поэтому прирост суммы = появился новый продукт.
-local function outputTotal()
-  local p    = outProxy()
-  local side = cfg.output.chestSide
-  local n = p.getInventorySize(side) or 0
-  local total = 0
+-- сколько каждого предмета лежит в буфере (по ключу)
+local function bufferCounts()
+  local t = transposer()
+  local n = t.getInventorySize(cfg.side.stock) or 0
+  local counts = {}
   for s = 1, n do
-    local st = p.getStackInSlot(side, s)
-    if st then total = total + (st.size or 0) end
-  end
-  return total
-end
-
--- Ждём, пока в вакуум-сундуке прибавится (продукт готов). Возвращает false при
--- прерывании. Продукт НЕ пришёл — не идём дальше (иначе перекормим котёл),
--- а громко предупреждаем и ждём: лучше видимо зависнуть, чем испортить варку.
-local function waitOutput()
-  local base = outputTotal()
-  local waited = 0
-  ui.state("варка: жду продукт", COL.green)
-  while true do
-    if event.pull(0, "interrupted") then return false end
-    os.sleep(1); ui.tick(); waited = waited + 1
-    local now = outputTotal()
-    if now > base then
-      ui.log(IC.ok, COL.cyan, ("продукт собран (вакуум-сундук +%d)"):format(now - base))
-      return true
-    end
-    if cfg.brewTimeout > 0 and waited % cfg.brewTimeout == 0 then
-      ui.log(IC.err, COL.red, ("продукт не пришёл за %d c — жду (варка зависла?)"):format(waited))
-      ui.state("варка зависла? жду продукт", COL.red)
+    local st = t.getStackInSlot(cfg.side.stock, s)
+    if st then
+      local k = keyOfStack(st)
+      counts[k] = (counts[k] or 0) + (st.size or 0)
     end
   end
+  return counts
 end
 
-local function runBuffer()
-  ui.log(IC.start, COL.accent, "режим buffer: порядок из паттерна AE")
-  local batches = 0
+-- потребность рецепта на ОДНУ порцию: ключ -> сколько
+local function recipeReq(recipe)
+  local req = {}
+  for _, step in ipairs(recipe.steps) do
+    local k = keyOfSpec(step)
+    req[k] = (req[k] or 0) + (step.count or 1)
+  end
+  return req
+end
+
+-- подобрать рецепт, все ингредиенты которого есть в буфере в достатке.
+-- при неоднозначности берём самый «специфичный» (больше разных ингредиентов),
+-- имена перебираем по алфавиту — выбор детерминирован.
+local function matchRecipe(counts)
+  local names = {}
+  for name in pairs(recipes) do names[#names + 1] = name end
+  table.sort(names)
+  local bestName, best, bestSize = nil, nil, -1
+  for _, name in ipairs(names) do
+    local recipe = normalizeRecipe(recipes[name])
+    local req, ok, size = recipeReq(recipe), true, 0
+    for k, need in pairs(req) do
+      size = size + 1
+      if (counts[k] or 0) < need then ok = false; break end
+    end
+    if ok and size > bestSize then bestName, best, bestSize = name, recipe, size end
+  end
+  return bestName, best
+end
+
+-- подпись состояния буфера (чтобы не спамить одним и тем же предупреждением)
+local function bufSig(counts)
+  local keys = {}
+  for k in pairs(counts) do keys[#keys + 1] = k end
+  table.sort(keys)
+  local parts = {}
+  for _, k in ipairs(keys) do parts[#parts + 1] = k .. "=" .. counts[k] end
+  return table.concat(parts, ",")
+end
+
+-- Единственный режим: заказ приходит из AE в буфер. Каждый проход распознаёт
+-- ОДИН полный рецепт по составу буфера и роняет РОВНО ОДНУ его порцию, затем
+-- повторяет. Так смесь из нескольких заказов разбирается по одной варке за раз;
+-- неполный остаток (AE ещё дозакладывает) НЕ роняется — ждём догрузки.
+local function runAuto()
+  ui.log(IC.start, COL.accent, "заказ из AE, порция за раз по рецепту")
+  local made, lastUnknown = 0, nil
   while true do
-    ui.state("ожидание набора из AE", COL.blue)
-    local snap = waitStableBatch()
+    ui.state("ожидание заказа из AE", COL.blue)
+    local snap = waitStableBatch()          -- ждём стабильный непустой буфер
     if not snap then
       ui.log(IC.info, COL.dim, "прервано пользователем")
       ui.state("остановлено", COL.dim)
       return
     end
-    batches = batches + 1
-    local total = 0
-    for _, it in ipairs(snap) do total = total + it.size end
-    ui.state("варка: вброс набора #" .. batches, COL.green)
-    ui.stat("Наборов", tostring(batches))
-    ui.log(IC.info, COL.text,
-      ("набор #%d: %d предметов в %d позициях"):format(batches, total, #snap))
-    refillWater()
-    dropBatch(snap)
-    ui.log(IC.ok, COL.cyan, "набор #" .. batches .. " вброшен")
-    -- ждём продукт в вакуум-сундуке, только потом берёмся за следующий набор
-    if cfg.output.address then
-      if not waitOutput() then
-        ui.log(IC.info, COL.dim, "прервано пользователем")
-        ui.state("остановлено", COL.dim)
-        return
+    local counts = bufferCounts()
+    local name, recipe = matchRecipe(counts)
+    if recipe then
+      lastUnknown = nil
+      made = made + 1
+      ui.state(("варка %s #%d"):format(name, made), COL.green)
+      ui.stat("Сварено", tostring(made))
+      ui.log(IC.info, COL.text, "распознан рецепт: " .. name)
+      brewOnce(recipe, ("%s #%d"):format(name, made))
+      ui.log(IC.ok, COL.cyan, ("%s #%d готов"):format(name, made))
+    else
+      -- остаток не складывается ни в один рецепт: не роняем, ждём догрузки.
+      -- предупреждаем один раз на каждое НОВОЕ состояние буфера, чтобы не спамить.
+      local sig = bufSig(counts)
+      if sig ~= lastUnknown then
+        ui.log(IC.err, COL.red, "в буфере неполный набор — жду недостающие ингредиенты")
+        ui.state("неполный набор — жду", COL.amber)
+        lastUnknown = sig
       end
-      moveToME()                        -- OC сам перекладывает продукт в ME
+      os.sleep(2); ui.tick()
     end
   end
-end
-
--- рецепт-режим: очередь из recipes/queue -------------------------------------
-local function runRecipe()
-  ui.log(IC.start, COL.accent, "режим recipe: порядок из таблицы recipes")
-  for _, job in ipairs(queue) do
-    local name, times = job[1], job[2]
-    local recipe = normalizeRecipe(assert(recipes[name], "нет рецепта: " .. tostring(name)))
-    for i = 1, times do
-      ui.state(("варка %s — партия %d/%d"):format(name, i, times), COL.green)
-      ui.stat("Партия", ("%s %d/%d"):format(name, i, times))
-      brewOnce(recipe, ("%s %d/%d"):format(name, i, times))
-      ui.log(IC.ok, COL.cyan, ("%s: партия %d/%d готова"):format(name, i, times))
-      if event.pull(0, "interrupted") then
-        ui.log(IC.info, COL.dim, "прервано пользователем")
-        ui.state("остановлено", COL.dim)
-        return
-      end
-    end
-  end
-  ui.log(IC.ok, COL.green, "готово: очередь выполнена")
-  ui.state("очередь выполнена", COL.cyan)
 end
 
 -- проверки перед стартом -----------------------------------------------------
@@ -725,20 +664,15 @@ local function preflight()
   -- transposer должен видеть буфер/склад
   assert((transposer().getInventorySize(cfg.side.stock) or 0) > 0,
     "transposer не видит буфер/склад на стороне cfg.side.stock")
-  -- если задан выход — проверяем компонент у вакуум-сундука
-  if cfg.output.address then
-    local p = outProxy()
-    assert((p.getInventorySize(cfg.output.chestSide) or 0) > 0,
-      "cfg.output не видит вакуум-сундук на стороне chestSide")
-    if cfg.output.toME then
-      assert(p.transferItem,
-        "cfg.output.toME=true, но у компонента нет transferItem — нужен transposer (Adapter не умеет), " ..
-        "касающийся вакуум-сундука и ME Interface")
-    end
-  end
-  if cfg.mode == "recipe" then
-    if cfg.detect == "me"    then meNet() end        -- ранняя проверка наличия
-    if cfg.detect == "chest" then chestCount({ label = "" }) end
+  -- компонент у вакуум-сундука (выход) обязателен: детект + перекладка в ME
+  assert(cfg.output.address, "cfg.output.address не задан (transposer у вакуум-сундука)")
+  local p = outProxy()
+  assert((p.getInventorySize(cfg.output.chestSide) or 0) > 0,
+    "cfg.output не видит вакуум-сундук на стороне chestSide")
+  if cfg.output.toME then
+    assert(p.transferItem,
+      "cfg.output.toME=true, но у компонента нет transferItem — нужен transposer (Adapter не умеет), " ..
+      "касающийся вакуум-сундука и ME Interface")
   end
 end
 
@@ -748,11 +682,7 @@ local function main()
   ui.log(IC.start, COL.accent, "cauldron.lua запущен")
   preflight()
   ui.log(IC.ok, COL.green, "проверки пройдены")
-  if cfg.mode == "buffer" then
-    runBuffer()
-  else
-    runRecipe()
-  end
+  runAuto()
 end
 
 --==========================================================================--
