@@ -8,7 +8,7 @@ of your energy buffers on the computer screen and in AR glasses at the same time
 The data layer and energy panel are written against the mod sources that actually ship in
 2.8.3 — so it reads what GregTech really returns, not what a generic monitor assumes.
 
-[Changelog](CHANGELOG.md) · [Development context](DETAILS.md) · [License & provenance](NOTICE.md)
+[Changelog](CHANGELOG.md) · [Technical details](DETAILS.md) · [License & provenance](NOTICE.md)
 
 ![ARGUS dashboard — charge, rates, energy moved and the charge graph](docs/dashboard.png)
 
