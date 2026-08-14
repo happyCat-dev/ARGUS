@@ -2,5 +2,6 @@ settings/
 *.tar
 *.tmp
 
-# Local-only dev context, intentionally untracked
+# Local-only working files, intentionally untracked
 CLAUDE.md
+ARGUS-discord.md
